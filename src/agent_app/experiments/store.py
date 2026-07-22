@@ -157,9 +157,7 @@ class AllocationStore:
     def counts(self, experiment_key: str) -> dict[str, int]:
         with self._lock:
             return {
-                variant: n
-                for (key, variant), n in self._counts.items()
-                if key == experiment_key
+                variant: n for (key, variant), n in self._counts.items() if key == experiment_key
             }
 
 

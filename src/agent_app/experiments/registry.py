@@ -81,7 +81,9 @@ class Experiment:
         for variant in self.variants:
             if variant.name == name:
                 return variant
-        raise KeyError(f"experiment {self.key!r} has no variant {name!r} (have: {self.variant_names})")
+        raise KeyError(
+            f"experiment {self.key!r} has no variant {name!r} (have: {self.variant_names})"
+        )
 
 
 # ─── The registry ────────────────────────────────────────────────────────────

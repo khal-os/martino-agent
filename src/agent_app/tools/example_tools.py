@@ -54,23 +54,23 @@ def reverse_text(text: str) -> str:
 
 
 def lookup_price(item: str) -> str:
-    """Look up a product's price. Demonstrates a CUSTOM LangWatch span.
+    """Look up a product's price. Demonstrates a CUSTOM OTel span.
 
     The Agno instrumentor already traces the tool call itself. Add a custom span
     around a *sub-step* (e.g. an external API call, a DB query, a retrieval) when
     you want its own timing/input/output in the trace tree.
     """
     try:
-        import langwatch
+        from opentelemetry import trace
 
-        # `type` ∈ llm | rag | tool | span | ... ; shows up as a node in the trace.
-        # ignore_missing_trace_warning: stay quiet when called outside a trace (tests).
-        with langwatch.span(
-            type="tool", name="price-catalog-lookup", ignore_missing_trace_warning=True
-        ) as span:
-            span.set_input({"item": item})
+        tracer = trace.get_tracer("agent_app.tools")
+        # openinference.span.kind ∈ TOOL | LLM | RETRIEVER | ... ; input.value /
+        # output.value surface as the node's payloads in the trace tree.
+        with tracer.start_as_current_span("price-catalog-lookup") as span:
+            span.set_attribute("openinference.span.kind", "TOOL")
+            span.set_attribute("input.value", item)
             price = _PRICE_CATALOG.get(item.lower(), "unknown")
-            span.set_output({"price": price})
+            span.set_attribute("output.value", price)
             return f"{item}: {price}"
     except Exception:  # noqa: BLE001 — telemetry must never break the tool
         price = _PRICE_CATALOG.get(item.lower(), "unknown")

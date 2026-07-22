@@ -1249,10 +1249,12 @@ dev = [
     { name = "ruff" },
 ]
 observability = [
-    { name = "langwatch" },
     { name = "openinference-instrumentation-agno" },
+    { name = "opentelemetry-exporter-otlp-proto-http" },
+    { name = "opentelemetry-sdk" },
 ]
 qa = [
+    { name = "langwatch" },
     { name = "langwatch-scenario" },
     { name = "orjson" },
     { name = "pandas" },
@@ -1263,11 +1265,13 @@ requires-dist = [
     { name = "agno", extras = ["os"], specifier = ">=2.5,<3.0" },
     { name = "anthropic", specifier = ">=0.40" },
     { name = "google-genai", specifier = ">=1.0" },
-    { name = "langwatch", marker = "extra == 'observability'", specifier = ">=0.2" },
+    { name = "langwatch", marker = "extra == 'qa'", specifier = ">=0.2" },
     { name = "langwatch-scenario", marker = "extra == 'qa'", specifier = ">=0.1" },
     { name = "mypy", marker = "extra == 'dev'", specifier = ">=1.11" },
     { name = "openai", specifier = ">=1.50" },
     { name = "openinference-instrumentation-agno", marker = "extra == 'observability'", specifier = ">=0.1" },
+    { name = "opentelemetry-exporter-otlp-proto-http", marker = "extra == 'observability'", specifier = ">=1.25" },
+    { name = "opentelemetry-sdk", marker = "extra == 'observability'", specifier = ">=1.25" },
     { name = "orjson", marker = "extra == 'qa'", specifier = ">=3.10" },
     { name = "pandas", marker = "extra == 'qa'", specifier = ">=2.0" },
     { name = "pgvector", specifier = ">=0.3" },

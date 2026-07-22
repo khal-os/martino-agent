@@ -12,6 +12,7 @@ Hits the real model — a nightly/pre-release lane, not the unit-test loop.
 
 from __future__ import annotations
 
+import os
 import sys
 from pathlib import Path
 
@@ -46,7 +47,15 @@ def _tools_called(run_response) -> set[str]:
 
 def main() -> int:
     settings = get_settings()
-    langwatch.setup(api_key=settings.langwatch_api_key, endpoint_url=settings.langwatch_endpoint)
+    # Evals talk to LangWatch DIRECTLY (offline tooling — outside the connector
+    # contract, which only covers the serving agent's traces/events). The agent
+    # itself never sees these variables; they live only in the eval operator's env.
+    endpoint = os.getenv("LANGWATCH_ENDPOINT")
+    api_key = os.getenv("LANGWATCH_API_KEY")
+    if not endpoint or not api_key:
+        print("Set LANGWATCH_ENDPOINT and LANGWATCH_API_KEY to run experiments.")
+        return 2
+    langwatch.setup(api_key=api_key, endpoint_url=endpoint)
     agent = get_agent(settings.agent_id)
 
     evaluation = evaluation_init("agent-template-cart-suite")

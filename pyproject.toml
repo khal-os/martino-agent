@@ -32,14 +32,18 @@ dev = [
     "mypy>=1.11",            # static type checking (strict). Swap to Astral `ty` once it's stable.
 ]
 observability = [
-    # LangWatch SDK + the Agno OpenInference instrumentor (auto-traces agent runs).
-    "langwatch>=0.2",
+    # Vendor-neutral OTLP export (destination resolved via the connector register)
+    # + the Agno OpenInference instrumentor (auto-traces agent runs).
+    "opentelemetry-sdk>=1.25",
+    "opentelemetry-exporter-otlp-proto-http>=1.25",
     "openinference-instrumentation-agno>=0.1",
 ]
 qa = [
     # Scenario testing (simulated user + LLM judge) → LangWatch Simulations.
     "langwatch-scenario>=0.1",
-    # LangWatch batch experiments (evals/langwatch_experiment.py).
+    # LangWatch batch experiments (evals/langwatch_experiment.py) — talks to
+    # LangWatch directly; offline tooling, outside the connector contract.
+    "langwatch>=0.2",
     "pandas>=2.0",
     "orjson>=3.10",   # litellm/langwatch runtime dep used during scenario/experiment
 ]

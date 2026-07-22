@@ -21,6 +21,7 @@ Design trade-offs (deliberate, for a small template):
 from __future__ import annotations
 
 import os
+import socket
 from dataclasses import dataclass
 from datetime import date
 from functools import lru_cache
@@ -90,12 +91,15 @@ class Settings:
     cache_extended_ttl: bool
     build_date: str
 
-    # --- Observability (LangWatch) ---
-    langwatch_enabled: bool
-    langwatch_endpoint: str
-    langwatch_api_key: str | None
+    # --- Observability (connector register) ---
+    # The ONLY observability setting in the env: where the per-client connector
+    # register lives. Unset → tracing off. Everything else (trace/event endpoints,
+    # credentials, TTL) is resolved from the register at runtime — never configure
+    # a vendor address here. See connector.py and docs/observability.md.
+    connector_register_url: str | None
     # Trace metadata (rich by default):
     service_name: str  # OTel service.name (Resource) — was "unknown_service"
+    agent_instance: str  # this deployment/replica (AGENT_INSTANCE, default: hostname)
     environment: str  # deployment.environment: dev | staging | prod
     agent_version: str  # the agent's semantic version (single source: _version.py)
     git_sha: str  # build/deploy provenance (GIT_SHA in CI), "unknown" locally
@@ -145,17 +149,18 @@ def _from_env() -> Settings:
         cache_extended_ttl=_flag("CACHE_EXTENDED_TTL", default=True),
         # Local calendar date is intentional here (cache-key freshness, not a timestamp).
         build_date=os.getenv("BUILD_DATE", date.today().isoformat()),  # noqa: DTZ011
-        langwatch_enabled=_flag("LANGWATCH_ENABLED", default=False),
-        langwatch_endpoint=os.getenv("LANGWATCH_ENDPOINT", "http://localhost:5560"),
-        langwatch_api_key=os.getenv("LANGWATCH_API_KEY") or None,
+        connector_register_url=os.getenv("CONNECTOR_REGISTER_URL") or None,
         service_name=os.getenv("OTEL_SERVICE_NAME") or os.getenv("AGENT_ID") or "assistant",
+        agent_instance=os.getenv("AGENT_INSTANCE") or socket.gethostname(),
         environment=environment,
         agent_version=__version__,
         git_sha=os.getenv("GIT_SHA", "unknown"),
         log_level=os.getenv("LOG_LEVEL", "INFO").upper(),
         # Default: structured JSON everywhere except local dev (pretty console there).
         log_json=_flag("LOG_JSON", default=(environment != "dev")),
-        experiments_store_path=os.getenv("EXPERIMENTS_STORE_PATH", "tmp/experiment_allocations.json"),
+        experiments_store_path=os.getenv(
+            "EXPERIMENTS_STORE_PATH", "tmp/experiment_allocations.json"
+        ),
         omni_agent_id=os.getenv("OMNI_AGENT_ID") or os.getenv("AGENT_ID") or "assistant",
         omni_experiment=os.getenv("OMNI_EXPERIMENT") or None,
         debug=_flag("DEBUG", default=False),

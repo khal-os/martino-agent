@@ -23,7 +23,7 @@ def build(monkeypatch, *, api_key=None, environment="dev"):
     else:
         monkeypatch.setenv("API_KEY", api_key)
     monkeypatch.setenv("ENVIRONMENT", environment)
-    monkeypatch.setenv("LANGWATCH_ENABLED", "0")
+    monkeypatch.delenv("CONNECTOR_REGISTER_URL", raising=False)
     config.get_settings.cache_clear()
     import agent_app.main as main
 
@@ -89,7 +89,7 @@ def test_feedback_rejects_bad_trace_id(monkeypatch):
 
 
 def test_feedback_accepts_valid_trace_id_noop_when_disabled(monkeypatch):
-    _, client = build(monkeypatch, api_key=None)  # LANGWATCH_ENABLED=0 → track_event no-ops
+    _, client = build(monkeypatch, api_key=None)  # no register URL → track_event no-ops
     r = client.post("/feedback", json={"trace_id": "0" * 32, "positive": False, "comment": "meh"})
     assert r.status_code == 200 and r.json()["recorded"] is False
 
@@ -98,14 +98,15 @@ def test_feedback_accepts_valid_trace_id_noop_when_disabled(monkeypatch):
 def _restore_main():
     """Leave agent_app.main in its default (dev, no key, no telemetry) state.
 
-    Force LANGWATCH off on the restoring reload so a real `.env` (LANGWATCH_ENABLED=1
-    + a stale key) can't make the reloaded module fire OTel exports during teardown.
+    Force the connector register off on the restoring reload so a real `.env`
+    (CONNECTOR_REGISTER_URL set) can't make the reloaded module fire OTel
+    exports during teardown.
     """
     import os
 
     yield
     import agent_app.main as main
 
-    os.environ["LANGWATCH_ENABLED"] = "0"
+    os.environ.pop("CONNECTOR_REGISTER_URL", None)
     config.get_settings.cache_clear()
     importlib.reload(main)

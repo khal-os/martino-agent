@@ -25,7 +25,7 @@ def _build(monkeypatch, tmp_path, *, api_key=None, experiment=None):
     else:
         monkeypatch.setenv("OMNI_EXPERIMENT", experiment)
     monkeypatch.setenv("ENVIRONMENT", "dev")
-    monkeypatch.setenv("LANGWATCH_ENABLED", "0")
+    monkeypatch.delenv("CONNECTOR_REGISTER_URL", raising=False)
     monkeypatch.setenv("EXPERIMENTS_STORE_PATH", str(tmp_path / "alloc.json"))
     config.get_settings.cache_clear()
     from agent_app.experiments import store as store_mod
@@ -104,9 +104,7 @@ def test_webhook_requires_token_when_api_key_set(monkeypatch, tmp_path):
     _, client = _build(monkeypatch, tmp_path, api_key="s3cret")
     _stub_agent(monkeypatch)
     assert client.post("/omni/webhook", json=_payload()).status_code == 401  # no token
-    ok = client.post(
-        "/omni/webhook", json=_payload(), headers={"Authorization": "Bearer s3cret"}
-    )
+    ok = client.post("/omni/webhook", json=_payload(), headers={"Authorization": "Bearer s3cret"})
     assert ok.status_code == 200
 
 
@@ -125,7 +123,7 @@ def _restore_main():
     import os
 
     yield
-    os.environ["LANGWATCH_ENABLED"] = "0"
+    os.environ.pop("CONNECTOR_REGISTER_URL", None)
     config.get_settings.cache_clear()
     import agent_app.main as main
 
