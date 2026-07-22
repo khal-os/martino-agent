@@ -1,0 +1,74 @@
+# Unofficial LOCAL VALIDATION stack for Automagik Omni, wired to this agent.
+#
+# ⚠️ NOT Omni's supported self-host path (that's Helm/k3d — see docs/omni.md and
+#    https://github.com/automagik-dev/omni). This is a one-command convenience to
+#    validate the template ↔ Omni integration locally: the Omni API + NATS/JetStream,
+#    reusing the agno Postgres (docker-compose.yml `db`) via a separate `omni`
+#    database, with media on local disk (OMNI_MEDIA_MODE=local — no S3/MinIO).
+#
+#   make up           # agno stack (Postgres on the shared network) — required first
+#   make omni-up      # → Omni API http://localhost:${OMNI_HOST_PORT:-8882} (/api/v2/docs)
+#   make omni-logs / omni-down
+#
+# ⚠️ Port: Omni's convention is 8882. If you ALSO run Omni natively (e.g. via PM2),
+#    it will already hold host :8882 and shadow this container — set OMNI_HOST_PORT
+#    to a free port (e.g. 8899) in your .env. Verified end-to-end; auth works.
+services:
+  omni-nats:
+    image: nats:2-alpine
+    command: ["-js"] # JetStream — Omni's event bus requires it
+    networks: [agent-net]
+    restart: unless-stopped
+
+  # One-shot: ensure a dedicated `omni` database exists on the shared agno Postgres.
+  # Idempotent; exits 0 once present. omni-api waits for it to complete.
+  omni-db-init:
+    image: postgres:16-alpine
+    networks: [agent-net]
+    restart: "no"
+    entrypoint:
+      - sh
+      - -c
+      - |
+        until pg_isready -h db -U agent; do echo "waiting for postgres…"; sleep 1; done
+        psql "postgresql://agent:agent@db:5432/agent" -tc "SELECT 1 FROM pg_database WHERE datname='omni'" | grep -q 1 \
+          || psql "postgresql://agent:agent@db:5432/agent" -c "CREATE DATABASE omni"
+        echo "omni database ready"
+
+  omni-api:
+    image: ghcr.io/automagik-dev/omni-api:v2.260713.3 # pinned; `:main` also works
+    depends_on:
+      omni-db-init:
+        condition: service_completed_successfully
+      omni-nats:
+        condition: service_started
+    environment:
+      # External Postgres (the agno `db`, separate `omni` database). Migrations
+      # run on boot (advisory-locked), so no manual migrate step.
+      DATABASE_URL: postgresql://agent:agent@db:5432/omni
+      PGSERVE_EMBEDDED: "false"
+      NATS_URL: nats://omni-nats:4222
+      NATS_MANAGED: "false"
+      API_HOST: 0.0.0.0
+      API_PORT: "8882"
+      OMNI_MEDIA_MODE: local # on-disk media — no S3/MinIO
+      # Enable the A2A JSON-RPC channel — the tokenless way to send a test message
+      # end-to-end (channel → Omni dispatcher → agent) without WhatsApp/Slack creds.
+      A2A_ENABLED: "true"
+      # Optional vision/STT keys (from your .env): Omni processes inbound images/
+      # audio BEFORE dispatch — without them it drops media. Not needed for text.
+      GEMINI_API_KEY: ${GEMINI_API_KEY:-}
+      OPENAI_API_KEY: ${OPENAI_API_KEY:-}
+      NODE_ENV: production
+      LOG_LEVEL: ${OMNI_LOG_LEVEL:-info}
+      # Seed a known bearer key so you can call the Omni API without scraping the
+      # startup banner from logs. Override in .env; dev-only default.
+      OMNI_API_KEY: ${OMNI_API_KEY:-omni_sk_dev_local}
+    ports:
+      - "${OMNI_HOST_PORT:-8882}:8882"
+    networks: [agent-net]
+    restart: unless-stopped
+
+networks:
+  agent-net:
+    external: true

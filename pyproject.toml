@@ -1,0 +1,151 @@
+[project]
+name = "nsmtx-agent-template"
+dynamic = ["version"]   # single source: src/agent_app/_version.py
+description = "A production-shaped template for building Agno agents (AgentOS + tools + hooks + knowledge + Docker)."
+readme = "README.md"
+requires-python = ">=3.11,<3.13"
+dependencies = [
+    # Agno core + AgentOS (FastAPI server). Pin to the 2.x line.
+    "agno[os]>=2.5,<3.0",
+    # ASGI server used by AgentOS.serve() and the Dockerfile CMD.
+    "uvicorn[standard]>=0.30",
+    # Postgres driver used by agno.db.postgres.PostgresDb and agno.vectordb.pgvector.
+    "psycopg[binary]>=3.2",
+    "sqlalchemy>=2.0",
+    "pgvector>=0.3",
+    # Settings / env loading.
+    "python-dotenv>=1.0",
+    # Structured logging (JSON in prod, pretty console in dev; OTel-trace-correlated).
+    "structlog>=24.1",
+    # --- Model providers: install what you use (all are light SDK shims) ---
+    "anthropic>=0.40",       # agno.models.anthropic.Claude
+    "openai>=1.50",          # agno.models.openai + openrouter + litellm-openai
+    "google-genai>=1.0",     # agno.models.google.Gemini
+]
+
+[project.optional-dependencies]
+dev = [
+    "pytest>=8.0",
+    "pytest-asyncio>=0.23",
+    "pytest-cov>=5.0",       # coverage gate (make test-cov / CI)
+    "ruff>=0.6",             # lint + format (the "Biome for Python")
+    "mypy>=1.11",            # static type checking (strict). Swap to Astral `ty` once it's stable.
+]
+observability = [
+    # LangWatch SDK + the Agno OpenInference instrumentor (auto-traces agent runs).
+    "langwatch>=0.2",
+    "openinference-instrumentation-agno>=0.1",
+]
+qa = [
+    # Scenario testing (simulated user + LLM judge) → LangWatch Simulations.
+    "langwatch-scenario>=0.1",
+    # LangWatch batch experiments (evals/langwatch_experiment.py).
+    "pandas>=2.0",
+    "orjson>=3.10",   # litellm/langwatch runtime dep used during scenario/experiment
+]
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.hatch.version]
+path = "src/agent_app/_version.py"   # pyproject version == __version__
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/agent_app"]
+
+[tool.ruff]
+line-length = 100
+target-version = "py311"
+src = ["src", "tests", "scripts", "evals"]
+
+[tool.ruff.lint]
+# Strict-by-default rule set. This is the "turned up" config: beyond the tiny
+# default (F + a bit of E), we opt into bug-catching, security, modernization and
+# style families. Loosen per-team by trimming this list — don't disable Ruff.
+select = [
+    "E", "W",   # pycodestyle errors + warnings
+    "F",        # pyflakes (undefined names, unused imports, …)
+    "I",        # isort (import ordering)
+    "N",        # pep8-naming
+    "UP",       # pyupgrade (use modern syntax for target-version)
+    "B",        # flake8-bugbear (likely bugs: mutable defaults, blind except, …)
+    "BLE",      # flake8-blind-except (catch Exception must be justified)
+    "A",        # flake8-builtins (shadowing builtins)
+    "C4",       # flake8-comprehensions
+    "DTZ",      # flake8-datetimez (naive datetimes)
+    "G",        # flake8-logging-format (no f-strings in log calls)
+    "LOG",      # flake8-logging (logger misuse)
+    "PIE",      # flake8-pie (misc lints)
+    "PTH",      # flake8-use-pathlib
+    "RET",      # flake8-return
+    "SIM",      # flake8-simplify
+    "T20",      # flake8-print (no stray print in library code)
+    "ASYNC",    # flake8-async (async gotchas)
+    "S",        # flake8-bandit (security)
+    "RUF",      # Ruff-specific rules
+]
+ignore = [
+    "E501",     # line length is enforced by the formatter, not the linter
+    # This template's comments/docstrings deliberately use arrows/em-dashes (→ —);
+    # don't flag them as "ambiguous unicode".
+    "RUF001", "RUF002", "RUF003",
+]
+
+[tool.ruff.lint.per-file-ignores]
+# Tests: asserts are the point; allow "hardcoded passwords" (fixtures) and prints.
+"tests/**" = ["S101", "S105", "S106", "T20"]
+# Scripts + evals are CLIs — printing to stdout is their job.
+"scripts/**" = ["T20"]
+# Evals also legitimately swallow best-effort evaluator errors (availability varies).
+"evals/**" = ["T20", "S110", "SIM105"]
+
+[tool.ruff.lint.isort]
+known-first-party = ["agent_app"]
+
+# ── Static typing (strict) ───────────────────────────────────────────────────
+[tool.mypy]
+python_version = "3.11"        # our support floor (ruff target-version matches)
+strict = true                  # the whole strict bundle: no untyped defs, no implicit Any, …
+# Strict typing targets the SHIPPED package — what template consumers import.
+# Tests/scripts/evals are validated by pytest + ruff; add them here if your team
+# wants typed tests too (expect to annotate fixtures and pull in stub landmines).
+files = ["src"]
+warn_unused_ignores = true
+warn_redundant_casts = true
+show_error_codes = true
+pretty = true
+
+[[tool.mypy.overrides]]
+# Third-party libs that ship no type information — trust their runtime shape.
+# follow_imports=skip stops mypy from analyzing their (sometimes malformed, e.g.
+# langwatch's namespace packages) source; treat them as Any instead.
+# Both the bare name and `.*` are needed: `numpy.*` matches submodules but NOT the
+# top-level `numpy` module, so `import numpy` would still be followed without it.
+module = [
+    "agno", "agno.*",
+    "langwatch", "langwatch.*",
+    "langwatch_scenario", "langwatch_scenario.*",
+    "scenario", "scenario.*",
+    "openinference", "openinference.*",
+    "opentelemetry", "opentelemetry.*",
+    "pgvector", "pgvector.*",
+    "pandas", "pandas.*",
+    "numpy", "numpy.*",
+]
+ignore_missing_imports = true
+follow_imports = "skip"
+
+[tool.pytest.ini_options]
+asyncio_mode = "auto"
+testpaths = ["tests"]
+markers = [
+    "agent_test: LangWatch Scenario simulation test (real models; run via `make scenario`)",
+]
+filterwarnings = [
+    # Benign: calling a langwatch span/tool outside a trace only happens in unit
+    # tests — in production every tool runs inside an instrumented agent run.
+    "ignore:No trace in context:UserWarning",
+    # Starlette TestClient's httpx-version deprecation notice — not our code.
+    "ignore:Using `httpx` with `starlette.testclient`:DeprecationWarning",
+]

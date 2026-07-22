@@ -1,0 +1,16 @@
+# AWS Copilot — the `production` environment (VPC + ALB + ECS cluster).
+# Created/updated by `make aws-up`.
+name: production
+type: Environment
+
+# ── HTTPS (STRONGLY recommended) ─────────────────────────────────────────────
+# By default the ALB serves HTTP on its generated *.elb.amazonaws.com DNS name —
+# which means the API_KEY bearer travels in CLEARTEXT over the internet. For any
+# real deployment, terminate TLS: either init the app with a Route53 domain
+# (`copilot app init --domain example.com`, which mints ACM certs per env), or
+# import an existing ACM cert in THIS region here:
+#
+# http:
+#   public:
+#     certificates:
+#       - arn:aws:acm:<region>:<account-id>:certificate/<cert-id>

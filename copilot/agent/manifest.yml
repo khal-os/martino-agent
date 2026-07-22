@@ -1,0 +1,58 @@
+# AWS Copilot — the agent service (Load Balanced Web Service on ECS Fargate).
+# Deployed with `make aws-up` / `make aws-redeploy` (wrappers over `copilot svc deploy`).
+# The same Dockerfile that runs locally is built and pushed to ECR by Copilot.
+name: agent
+type: Load Balanced Web Service
+
+# Build the repo Dockerfile and serve on the app's port (see Dockerfile EXPOSE 8888).
+image:
+  build: Dockerfile
+  port: 8888
+  # Copilot's Aurora secret JSON → DATABASE_URL happens in this shim before uvicorn.
+  # It is a no-op locally (DATABASE_URL/SQLite already resolved), so the image is
+  # identical dev↔prod. Command mirrors the Dockerfile CMD.
+  entrypoint: ["/bin/sh", "/app/scripts/aws/entrypoint.sh"]
+  command:
+    ["uvicorn", "agent_app.main:app", "--host", "0.0.0.0", "--port", "8888", "--workers", "2"]
+
+# Public ALB. Health check hits /health (readiness — 503 when the DB is down, so a
+# task that lost the DB is pulled from the pool). The container's own healthcheck
+# uses /livez (liveness) to avoid restart-looping on a transient DB blip.
+http:
+  path: "/"
+  healthcheck:
+    path: "/health"
+    healthy_threshold: 2
+    unhealthy_threshold: 3
+    interval: 15s
+    timeout: 5s
+    grace_period: 30s
+
+cpu: 512 # 0.5 vCPU
+memory: 1024 # 1 GB
+platform: linux/x86_64
+count: 1 # bump for horizontal scale; state lives in Postgres, so replicas are safe
+exec: true # `copilot svc exec` shell into the task for debugging
+
+# Non-secret config. Secrets (keys, DB URL) come via `secrets:` below — never here.
+variables:
+  ENVIRONMENT: prod # JSON logs + fail-closed auth posture (see main.py)
+  PORT: 8888
+  MODEL_PROVIDER: anthropic
+  MODEL_ID: "@medium"
+  API_WORKERS: 2
+  PROMPT_CACHE: 1
+  KNOWLEDGE_ENABLED: 0 # flip to 1 after `CREATE EXTENSION vector` on the DB
+  LANGWATCH_ENABLED: 0
+
+# SSM SecureString params created by `make aws-secrets` (scripts/aws/env-sync.sh).
+# The ${COPILOT_*} interpolation keeps this manifest app/env-name agnostic.
+# API_KEY is REQUIRED in prod — without it every protected route denies (main.py).
+secrets:
+  API_KEY: /copilot/${COPILOT_APPLICATION_NAME}/${COPILOT_ENVIRONMENT_NAME}/secrets/API_KEY
+  ANTHROPIC_API_KEY: /copilot/${COPILOT_APPLICATION_NAME}/${COPILOT_ENVIRONMENT_NAME}/secrets/ANTHROPIC_API_KEY
+
+# Per-environment overrides go here (e.g. a bigger task in prod).
+environments:
+  production:
+    count: 1

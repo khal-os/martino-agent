@@ -1,0 +1,23 @@
+# Production hardening override for a single VM/host (the cheap non-AWS path).
+#
+#   docker compose -f docker-compose.yml -f docker-compose.prod.yml up -d --build
+#
+# Differences vs the dev base (docker-compose.yml):
+#   • Postgres bound to loopback only — no public :5432 on the box.
+#   • Both services restart unless explicitly stopped.
+#   • ENVIRONMENT=prod → JSON logs + fail-closed auth posture (see main.py).
+#   • API_KEY is REQUIRED — compose refuses to start without it (deny-all otherwise).
+services:
+  db:
+    # !override replaces the dev port mapping instead of merging with it.
+    ports: !override
+      - "127.0.0.1:5432:5432"
+    restart: unless-stopped
+
+  app:
+    restart: unless-stopped
+    environment:
+      ENVIRONMENT: prod
+      LOG_JSON: 1
+      # :? fails fast at `up` time if API_KEY is unset in the shell/.env.
+      API_KEY: ${API_KEY:?set API_KEY for prod — protected routes deny-all without it}
