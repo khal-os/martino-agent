@@ -1,6 +1,6 @@
 .DEFAULT_GOAL := help
 .PHONY: help install install-obs dev run test test-cov lint format typecheck check \
-        eval eval-case scenario experiment demo-fallback seed \
+        eval eval-case scenario experiment demo-fallback chat seed \
         net up down restart logs ps docker-build prod-up prod-down \
         langwatch-up langwatch-init langwatch-down stack-up stack-down \
         aws-up aws-redeploy aws-down aws-secrets aws-logs \
@@ -61,6 +61,9 @@ experiment: ## Batch-evaluate over a dataset → LangWatch Experiments
 
 demo-fallback: ## Live demo: primary model 503s → cross-provider fallback serves
 	uv run python scripts/fallback_demo.py
+
+chat: ## Minimal chat UI against the local agent (http://localhost:8899)
+	uv run python scripts/chat_ui.py
 
 # ─── Knowledge ───────────────────────────────────────────────────────────────
 
