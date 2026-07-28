@@ -28,6 +28,13 @@ CONNECTOR_ID="${CONNECTOR_ID:-langwatch-cliente}"
 OTLP_ENDPOINT="${OTLP_ENDPOINT:-http://localhost:5562/api/otel/v1/traces}"
 CREDENTIAL_REF="${CREDENTIAL_REF:-workos-vault://${CONNECTOR_ID}}"
 
+# Empty shell expansions produce silent garbage (id "langwatch-", endpoint
+# "http://localhost:/..." ) — refuse them loudly instead of registering it.
+[[ "$CONNECTOR_ID" =~ ^[a-z0-9][a-z0-9-]*[a-z0-9]$ ]] \
+  || { echo "ERROR: CONNECTOR_ID '$CONNECTOR_ID' looks like an empty expansion (export CLIENT?)"; exit 1; }
+[[ "$OTLP_ENDPOINT" =~ ^https?://[^/:]+(:[0-9]+)?/ ]] \
+  || { echo "ERROR: OTLP_ENDPOINT '$OTLP_ENDPOINT' is malformed (empty \$LANGWATCH_PORT?)"; exit 1; }
+
 # Dev claims token (base64url JSON) — the local register reads claims verbatim;
 # production tokens are real RS256 JWTs from the Auth System.
 TOKEN=$(python3 -c "import base64,json,sys;print(base64.urlsafe_b64encode(json.dumps({'tenant':sys.argv[1],'client_id':'khal-register-connector.sh','scope':'connectors.registry:read connectors.registry:write'}).encode()).decode().rstrip('='))" "$TENANT")
