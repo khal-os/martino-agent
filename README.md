@@ -76,7 +76,15 @@ make seed                     # embeds knowledge_base/*.md into PgVector
 make install-obs              # observability + QA extras (langwatch, scenario, pandas)
 make langwatch-up             # self-hosted LangWatch stack → http://localhost:5560
 make langwatch-init           # DEV-ONLY: auto-creates project + writes LANGWATCH_API_KEY to .env
-make dev                      # every run is now traced (tokens, cost, tools, custom spans)
+```
+The agent itself never reads `LANGWATCH_API_KEY` — tracing turns on via
+`CONNECTOR_REGISTER_URL`, which points at a **connector register** document
+holding the trace/event endpoints + credentials. In dev, serve that document as
+a static file (the "mock connector") and run — see
+[`docs/observability.md`](docs/observability.md) §7 for the copy-paste steps:
+
+```bash
+make dev                      # with the register up: every run is traced (tokens, cost, tools, spans)
 ```
 `make scenario` and `make experiment` (the LangWatch QA lanes) also need `make install-obs`.
 
