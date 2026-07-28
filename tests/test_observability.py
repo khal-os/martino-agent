@@ -92,42 +92,171 @@ def test_enrich_sets_attributes_on_recording_span(monkeypatch):
 # ── ConnectorClient ──────────────────────────────────────────────────────────
 
 
-def _fake_urlopen(doc):
-    """Patchable stand-in for urllib.request.urlopen returning `doc` as JSON."""
+def _resolution(**overrides):
+    """A khal /connections resolution document (Bearer header credential)."""
+    doc = {
+        "connectorId": "langwatch-cliente",
+        "connectsTo": "monitoring",
+        "resolvedUrl": "http://lw:5562/api/otel/v1/traces",
+        "ttlSeconds": 900,
+        "chosenBinding": {
+            "transport": "http",
+            "protocol": "otlp",
+            "encoding": "protobuf",
+            "endpoint": "http://lw:5562/api/otel/v1/traces",
+            "auth": {"placement": "header", "name": "authorization", "scheme": "Bearer"},
+        },
+        "credential": {
+            "placement": "header",
+            "name": "authorization",
+            "scheme": "Bearer",
+            "value": "sk-real",
+        },
+    }
+    doc.update(overrides)
+    return doc
+
+
+def _capturing_urlopen(responses, calls):
+    """Fake urlopen: records each Request into `calls`, pops from `responses`.
+
+    Each response is a dict (served as JSON) or an Exception (raised).
+    """
     import contextlib
     import io
 
     @contextlib.contextmanager
     def opener(req, timeout=None):
-        yield io.BytesIO(json.dumps(doc).encode())
+        calls.append(req)
+        item = responses.pop(0)
+        if isinstance(item, Exception):
+            raise item
+        yield io.BytesIO(json.dumps(item).encode())
 
     return opener
 
 
-def test_connector_client_resolves_links(monkeypatch):
+def _http_error(status, code):
+    import io
+    import urllib.error
+
+    return urllib.error.HTTPError(
+        "http://register.local/connections",
+        status,
+        "err",
+        None,  # type: ignore[arg-type]
+        io.BytesIO(json.dumps({"status": status, "code": code}).encode()),
+    )
+
+
+def test_connector_client_resolves_traces_via_connections(monkeypatch):
     import agent_app.connector as connector_mod
 
-    doc = {
-        "version": "1",
-        "ttl_seconds": 300,
-        "links": {
-            "traces": {
-                "href": "http://lw:5560/api/otel/v1/traces",
-                "headers": {"Authorization": "Bearer k"},
-            },
-            "events": {"href": "http://lw:5560/api/track_event", "headers": {"X-Auth-Token": "k"}},
-            "future-capability": {"href": "http://elsewhere/x"},
-        },
-    }
-    monkeypatch.setattr(connector_mod.urllib.request, "urlopen", _fake_urlopen(doc))
-    client = ConnectorClient("http://register.local")
-    traces = client.link("traces")
-    assert traces is not None
-    assert traces.href == "http://lw:5560/api/otel/v1/traces"
-    assert traces.headers == {"Authorization": "Bearer k"}
-    # Unknown links are exposed but never break anything; absent ones are None.
-    assert client.link("future-capability") is not None
-    assert client.link("nope") is None
+    calls = []
+    monkeypatch.setattr(
+        connector_mod.urllib.request, "urlopen", _capturing_urlopen([_resolution()], calls)
+    )
+    client = ConnectorClient("http://register.local", "tkn")
+    link = client.link("traces")
+
+    # The intent went to POST /connections with the register token.
+    assert calls[0].full_url == "http://register.local/connections"
+    assert calls[0].get_header("Authorization") == "Bearer tkn"
+    body = json.loads(calls[0].data.decode())
+    assert body["capability"] == {"signal": "monitoring.trace", "operation": "write"}
+    assert body["binding"] == {"transport": "http", "protocol": "otlp", "encoding": "protobuf"}
+
+    # The link is the resolved endpoint with the credential applied.
+    assert link is not None
+    assert link.href == "http://lw:5562/api/otel/v1/traces"
+    assert link.headers == {"authorization": "Bearer sk-real"}
+
+
+def test_connector_client_apikey_scheme_sends_bare_value(monkeypatch):
+    import agent_app.connector as connector_mod
+
+    doc = _resolution(
+        credential={"placement": "header", "name": "X-Api-Key", "scheme": "ApiKey", "value": "k1"}
+    )
+    monkeypatch.setattr(
+        connector_mod.urllib.request, "urlopen", _capturing_urlopen([doc], [])
+    )
+    link = ConnectorClient("http://register.local", "tkn").link("traces")
+    assert link is not None
+    assert link.headers == {"X-Api-Key": "k1"}  # no "ApiKey " prefix
+
+
+def test_connector_client_query_placement_appends_param(monkeypatch):
+    import agent_app.connector as connector_mod
+
+    doc = _resolution(
+        resolvedUrl="http://lw:5562/v1/traces?a=1",
+        credential={"placement": "query", "name": "api_key", "scheme": "ApiKey", "value": "k 1"},
+    )
+    monkeypatch.setattr(
+        connector_mod.urllib.request, "urlopen", _capturing_urlopen([doc], [])
+    )
+    link = ConnectorClient("http://register.local", "tkn").link("traces")
+    assert link is not None
+    assert link.href == "http://lw:5562/v1/traces?a=1&api_key=k+1"
+    assert link.headers == {}
+
+
+def test_connector_client_no_credential_no_headers(monkeypatch):
+    import agent_app.connector as connector_mod
+
+    doc = _resolution()
+    del doc["credential"]
+    monkeypatch.setattr(
+        connector_mod.urllib.request, "urlopen", _capturing_urlopen([doc], [])
+    )
+    link = ConnectorClient("http://register.local", "tkn").link("traces")
+    assert link is not None
+    assert link.headers == {}
+
+
+def test_connector_client_events_capability_off_without_http(monkeypatch):
+    import agent_app.connector as connector_mod
+
+    calls = []
+    monkeypatch.setattr(
+        connector_mod.urllib.request, "urlopen", _capturing_urlopen([], calls)
+    )
+    client = ConnectorClient("http://register.local", "tkn")
+    # No event signal exists on the platform yet → off, and no request is made.
+    assert client.link("events") is None
+    assert client.link("events") is None
+    assert calls == []
+
+
+def test_connector_client_404_is_negative_cached(monkeypatch):
+    import agent_app.connector as connector_mod
+
+    calls = []
+    monkeypatch.setattr(
+        connector_mod.urllib.request,
+        "urlopen",
+        _capturing_urlopen([_http_error(404, "no_connector_for_capability")], calls),
+    )
+    client = ConnectorClient("http://register.local", "tkn")
+    assert client.link("traces") is None
+    assert client.link("traces") is None  # served from the negative cache
+    assert len(calls) == 1
+
+
+def test_connector_client_auth_error_throttles_not_crashes(monkeypatch):
+    import agent_app.connector as connector_mod
+
+    calls = []
+    monkeypatch.setattr(
+        connector_mod.urllib.request,
+        "urlopen",
+        _capturing_urlopen([_http_error(403, "insufficient_scope")], calls),
+    )
+    client = ConnectorClient("http://register.local", "tkn")
+    assert client.link("traces") is None  # best-effort: no link, no crash
+    assert client.link("traces") is None  # throttled: no second attempt yet
+    assert len(calls) == 1
 
 
 def test_connector_client_register_down_is_none_not_crash(monkeypatch):
@@ -137,30 +266,37 @@ def test_connector_client_register_down_is_none_not_crash(monkeypatch):
         raise OSError("connection refused")
 
     monkeypatch.setattr(connector_mod.urllib.request, "urlopen", boom)
-    client = ConnectorClient("http://register.local")
+    client = ConnectorClient("http://register.local", "tkn")
     assert client.link("traces") is None  # best-effort: no link, no crash
 
 
-def test_connector_client_invalidate_forces_refetch(monkeypatch):
+def test_connector_client_invalidate_forces_reresolution(monkeypatch):
     import agent_app.connector as connector_mod
 
-    docs = iter(
-        [
-            {"ttl_seconds": 3600, "links": {"traces": {"href": "http://old/v1/traces"}}},
-            {"ttl_seconds": 3600, "links": {"traces": {"href": "http://new/v1/traces"}}},
-        ]
+    responses = [
+        _resolution(resolvedUrl="http://old/v1/traces"),
+        _resolution(resolvedUrl="http://new/v1/traces"),
+    ]
+    monkeypatch.setattr(
+        connector_mod.urllib.request, "urlopen", _capturing_urlopen(responses, [])
     )
-
-    import contextlib
-    import io
-
-    @contextlib.contextmanager
-    def opener(req, timeout=None):
-        yield io.BytesIO(json.dumps(next(docs)).encode())
-
-    monkeypatch.setattr(connector_mod.urllib.request, "urlopen", opener)
-    client = ConnectorClient("http://register.local")
+    client = ConnectorClient("http://register.local", "tkn")
     assert client.link("traces").href == "http://old/v1/traces"
-    assert client.link("traces").href == "http://old/v1/traces"  # cached (TTL not expired)
-    client.invalidate()  # e.g. exports started failing — vendor moved
+    assert client.link("traces").href == "http://old/v1/traces"  # cached (ttlSeconds)
+    client.invalidate()  # e.g. exports started failing — connector moved
     assert client.link("traces").href == "http://new/v1/traces"
+
+
+def test_setup_observability_url_without_token_stays_off(monkeypatch):
+    from agent_app import config
+    from agent_app.observability import setup_observability
+
+    monkeypatch.setenv("CONNECTOR_REGISTER_URL", "http://register.local")
+    monkeypatch.delenv("CONNECTOR_REGISTER_TOKEN", raising=False)
+    config.get_settings.cache_clear()
+
+    import agent_app.observability as obs
+
+    setup_observability(config.get_settings())
+    assert obs._INITIALIZED is False  # tracing off, no crash
+    config.get_settings.cache_clear()

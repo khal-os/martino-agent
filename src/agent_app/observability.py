@@ -122,13 +122,22 @@ def setup_observability(settings: Settings) -> None:
     global _INITIALIZED, _CONNECTOR
     if _INITIALIZED or not settings.connector_register_url:
         return
+    if not settings.connector_register_token:
+        # The register requires auth — url without token can never resolve.
+        logger.warning(
+            "CONNECTOR_REGISTER_URL is set but CONNECTOR_REGISTER_TOKEN is not; "
+            "tracing stays OFF (the connector register requires a token)."
+        )
+        return
     try:
         from opentelemetry import trace as otel_trace
         from opentelemetry.sdk.resources import Resource
         from opentelemetry.sdk.trace import TracerProvider
         from opentelemetry.sdk.trace.export import BatchSpanProcessor
 
-        _CONNECTOR = ConnectorClient(settings.connector_register_url)
+        _CONNECTOR = ConnectorClient(
+            settings.connector_register_url, settings.connector_register_token
+        )
 
         provider = TracerProvider(resource=Resource.create(_resource_attributes(settings)))
         provider.add_span_processor(BatchSpanProcessor(_ConnectorSpanExporter(_CONNECTOR)))

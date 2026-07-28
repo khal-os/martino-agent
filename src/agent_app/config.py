@@ -92,11 +92,13 @@ class Settings:
     build_date: str
 
     # --- Observability (connector register) ---
-    # The ONLY observability setting in the env: where the per-client connector
-    # register lives. Unset → tracing off. Everything else (trace/event endpoints,
-    # credentials, TTL) is resolved from the register at runtime — never configure
-    # a vendor address here. See connector.py and docs/observability.md.
+    # The observability settings in the env: where the per-client khal
+    # connector-register lives and the token it requires. Either unset →
+    # tracing off. Everything else (trace endpoints, credentials, TTL) is
+    # resolved from the register at runtime — never configure a vendor
+    # address here. See connector.py and docs/observability.md.
     connector_register_url: str | None
+    connector_register_token: str | None  # M2M token (dev: base64url claims token)
     # Trace metadata (rich by default):
     service_name: str  # OTel service.name (Resource) — was "unknown_service"
     agent_instance: str  # this deployment/replica (AGENT_INSTANCE, default: hostname)
@@ -153,6 +155,7 @@ def _from_env() -> Settings:
         # Local calendar date is intentional here (cache-key freshness, not a timestamp).
         build_date=os.getenv("BUILD_DATE", date.today().isoformat()),  # noqa: DTZ011
         connector_register_url=os.getenv("CONNECTOR_REGISTER_URL") or None,
+        connector_register_token=os.getenv("CONNECTOR_REGISTER_TOKEN") or None,
         service_name=os.getenv("OTEL_SERVICE_NAME") or os.getenv("AGENT_ID") or "assistant",
         agent_instance=os.getenv("AGENT_INSTANCE") or socket.gethostname(),
         environment=environment,
