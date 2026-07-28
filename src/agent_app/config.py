@@ -103,6 +103,9 @@ class Settings:
     environment: str  # deployment.environment: dev | staging | prod
     agent_version: str  # the agent's semantic version (single source: _version.py)
     git_sha: str  # build/deploy provenance (GIT_SHA in CI), "unknown" locally
+    channel: str  # default channel type for non-omni entry points (omni overrides per-request)
+    domain: str | None  # business domain of this deployment (platform trace filter)
+    subdomain: str | None  # business subdomain of this deployment
 
     # --- Logging ---
     log_level: str  # DEBUG | INFO | WARNING | ERROR
@@ -155,6 +158,9 @@ def _from_env() -> Settings:
         environment=environment,
         agent_version=__version__,
         git_sha=os.getenv("GIT_SHA", "unknown"),
+        channel=os.getenv("CHANNEL", "api"),
+        domain=os.getenv("DOMAIN") or None,
+        subdomain=os.getenv("SUBDOMAIN") or None,
         log_level=os.getenv("LOG_LEVEL", "INFO").upper(),
         # Default: structured JSON everywhere except local dev (pretty console there).
         log_json=_flag("LOG_JSON", default=(environment != "dev")),

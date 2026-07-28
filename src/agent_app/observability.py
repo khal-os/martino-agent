@@ -68,6 +68,13 @@ def _resource_attributes(settings: Settings) -> dict[str, Any]:
     }
     if settings.git_sha != "unknown":
         attrs["vcs.revision"] = settings.git_sha  # build/deploy provenance
+    # Business scope of this deployment — static, so it rides the Resource.
+    # Bare keys on purpose (same rationale as agent.version above): they are
+    # the platform module's primary trace-filter keys.
+    if settings.domain:
+        attrs["domain"] = settings.domain
+    if settings.subdomain:
+        attrs["subdomain"] = settings.subdomain
     return attrs
 
 
@@ -164,6 +171,9 @@ def enrich_current_trace(
     user_id: str | None = None,
     session_id: str | None = None,
     customer_id: str | None = None,
+    channel: str | None = None,
+    channel_version: str | None = None,
+    channel_instance: str | None = None,
     metadata: dict[str, Any] | None = None,
 ) -> None:
     """Attach per-request metadata to the active (auto-instrumented) span.
@@ -171,12 +181,19 @@ def enrich_current_trace(
     - ``user_id`` / ``session_id`` / ``customer_id`` use reserved keys the
       platform promotes to trace-level fields, so the UI can group & filter by
       user, conversation (thread) and tenant.
+    - ``channel`` / ``channel_version`` / ``channel_instance`` are stamped as
+      BARE keys (like the ``ab.*`` experiment tags): they are the platform
+      module's contract keys for which communication channel served the run
+      (whatsapp/discord/api/...) and which deployment of it. Per-request on
+      purpose — omni turns carry the real channel, direct API runs get the
+      configured default; a Resource-level default would mislabel omni traces
+      if the per-request stamp ever failed.
     - ``metadata`` entries become ``app.<key>`` span attributes — backend-agnostic,
-      always queryable (this is how you add tenant, channel, request-source, etc.).
+      always queryable (this is how you add tenant, plan, request-source, etc.).
 
-    Static process-wide metadata (service/version/env/model) is set once on the
-    OTel Resource in ``setup_observability`` — don't duplicate it per request.
-    Safe no-op when tracing is off or no span is recording.
+    Static process-wide metadata (service/version/env/model/domain) is set once
+    on the OTel Resource in ``setup_observability`` — don't duplicate it per
+    request. Safe no-op when tracing is off or no span is recording.
     """
     with contextlib.suppress(Exception):  # telemetry must never break a run
         from opentelemetry import trace as _otel
@@ -190,6 +207,12 @@ def enrich_current_trace(
             span.set_attribute(_LW_THREAD_ID, session_id)
         if customer_id:
             span.set_attribute(_LW_CUSTOMER_ID, customer_id)
+        if channel:
+            span.set_attribute("channel", channel)
+        if channel_version:
+            span.set_attribute("channel.version", channel_version)
+        if channel_instance:
+            span.set_attribute("channel.instance", channel_instance)
         for key, value in (metadata or {}).items():
             if value is not None:
                 span.set_attribute(f"app.{key}", value)

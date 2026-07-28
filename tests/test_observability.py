@@ -19,6 +19,9 @@ def test_resource_attributes_are_rich(monkeypatch):
     monkeypatch.setenv("AGENT_INSTANCE", "replica-7")
     monkeypatch.setenv("ENVIRONMENT", "prod")
     monkeypatch.setenv("GIT_SHA", "abc123")
+    # The developer's own .env may set these (loaded at import) — isolate.
+    monkeypatch.delenv("DOMAIN", raising=False)
+    monkeypatch.delenv("SUBDOMAIN", raising=False)
     config.get_settings.cache_clear()
     attrs = _resource_attributes(config.get_settings())
     assert attrs["service.name"] == "my-svc"  # fixes unknown_service
@@ -29,6 +32,20 @@ def test_resource_attributes_are_rich(monkeypatch):
     assert attrs["agent.instance"] == "replica-7"
     assert attrs["vcs.revision"] == "abc123"  # build provenance
     assert attrs["model.provider"] and attrs["model.id"]
+    # domain/subdomain unset → keys absent (never empty strings).
+    assert "domain" not in attrs
+    assert "subdomain" not in attrs
+    config.get_settings.cache_clear()
+
+
+def test_resource_attributes_include_domain_scope(monkeypatch):
+    monkeypatch.setenv("DOMAIN", "varejo")
+    monkeypatch.setenv("SUBDOMAIN", "loja-sp")
+    config.get_settings.cache_clear()
+    attrs = _resource_attributes(config.get_settings())
+    # Bare keys on purpose — the platform module's trace-filter keys.
+    assert attrs["domain"] == "varejo"
+    assert attrs["subdomain"] == "loja-sp"
     config.get_settings.cache_clear()
 
 
@@ -55,14 +72,21 @@ def test_enrich_sets_attributes_on_recording_span(monkeypatch):
         user_id="user-1",
         session_id="thread-1",
         customer_id="tenant-9",
-        metadata={"turn": 2, "channel": "web", "skipme": None},
+        channel="whatsapp",
+        channel_version="3.2.0",
+        channel_instance="omni-wa-1",
+        metadata={"turn": 2, "skipme": None},
     )
     assert captured["langwatch.user.id"] == "user-1"
     assert captured["langwatch.thread.id"] == "thread-1"
     assert captured["langwatch.customer.id"] == "tenant-9"
+    # Channel contract keys are BARE (not app.*) — the platform reads them.
+    assert captured["channel"] == "whatsapp"
+    assert captured["channel.version"] == "3.2.0"
+    assert captured["channel.instance"] == "omni-wa-1"
     assert captured["app.turn"] == 2
-    assert captured["app.channel"] == "web"
     assert "app.skipme" not in captured  # None values are dropped
+    assert "app.channel" not in captured
 
 
 # ── ConnectorClient ──────────────────────────────────────────────────────────
