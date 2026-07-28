@@ -53,6 +53,43 @@ def test_auth_requires_token_when_key_set(monkeypatch):
     assert client.get(PROTECTED, headers={"Authorization": "Bearer s3cret"}).status_code == 404
 
 
+def test_x_channel_headers_are_captured_per_request(monkeypatch):
+    main, client = build(monkeypatch)
+    from agent_app.middleware import current_request_channel
+
+    @main.app.get("/channel-probe")
+    def probe():  # runs inside the request → sees the middleware's ContextVar
+        channel = current_request_channel()
+        return {"channel": channel._asdict() if channel else None}
+
+    full = client.get(
+        "/channel-probe",
+        headers={
+            "X-Channel-Type": "  browser  ",
+            "X-Channel-Version": "1.2.0",
+            "X-Channel-Instance": "webapp-3",
+        },
+    ).json()
+    assert full == {
+        "channel": {"type": "browser", "version": "1.2.0", "instance": "webapp-3"}
+    }  # type trimmed
+
+    partial = client.get(
+        "/channel-probe", headers={"X-Channel-Version": "1.2.0"}
+    ).json()
+    assert partial == {
+        "channel": {"type": None, "version": "1.2.0", "instance": None}
+    }
+
+    assert client.get("/channel-probe").json() == {"channel": None}  # no headers
+    assert current_request_channel() is None  # reset outside a request
+
+    oversized = client.get(
+        "/channel-probe", headers={"X-Channel-Type": "x" * 200}
+    ).json()
+    assert len(oversized["channel"]["type"]) == 64  # caller-controlled → capped
+
+
 def test_public_paths_never_need_a_token(monkeypatch):
     _, client = build(monkeypatch, api_key="s3cret", environment="prod")
     for path in ("/livez", "/health"):

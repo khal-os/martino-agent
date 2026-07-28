@@ -23,7 +23,7 @@ from .agents import get_agents
 from .config import get_settings
 from .experiments import build_experiment_factories, register_experiment_routes
 from .log import configure_logging, get_logger
-from .middleware import BearerAuthMiddleware
+from .middleware import BearerAuthMiddleware, ChannelHeaderMiddleware
 from .observability import setup_observability
 from .omni import register_omni_route
 from .routes import build_health_route, build_livez_route, register_feedback_route
@@ -67,6 +67,8 @@ app: FastAPI = agent_os.get_app()
 
 # Bearer-token gate on protected routes (see middleware.py for the auth posture).
 app.add_middleware(BearerAuthMiddleware, settings=settings)
+# Per-request channel capture (X-Channel header → trace `channel` attribute).
+app.add_middleware(ChannelHeaderMiddleware)
 
 # Custom probes + feedback (see routes.py). health/livez are bound at module level
 # so they're importable/testable; both are inserted at the FRONT of the router so
