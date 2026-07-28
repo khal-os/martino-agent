@@ -65,30 +65,50 @@ def enrich_trace(
     run_context: Any = None,
     agent: Any = None,
     user_id: str | None = None,
+    metadata: dict[str, Any] | None = None,
 ) -> None:
     """Stamp rich, per-request metadata onto the observability trace.
 
-    Static resource metadata (service/version/env/model) is set once in
+    Static resource metadata (service/version/env/model/domain) is set once in
     observability.py (OTel Resource). This hook adds the *dynamic* bits so traces
-    are filterable in LangWatch by user, conversation and any app-specific context.
-    Agno already sets user/thread from run params; we (re)assert them and show how
-    to attach custom fields (here: the turn count). Safe no-op when tracing is off.
+    are filterable in LangWatch by user, conversation, channel and any
+    app-specific context. Agno already sets user/thread from run params; we
+    (re)assert them and show how to attach custom fields (here: the turn count).
+    Safe no-op when tracing is off.
+
+    Channel resolution: run ``metadata`` wins (omni puts the real channelType
+    there — whatsapp/discord/...), then the request's ``X-Channel-Type`` /
+    ``X-Channel-Version`` / ``X-Channel-Instance`` headers (UIs and
+    integrations declare themselves: browser/web/backoffice/...), else the
+    configured default (``CHANNEL``, for plain API runs). Same
+    metadata-or-run_context pattern as the tag_experiment hook below.
 
     We also bind ``user_id`` / ``session_id`` into the logging context here, so
     every log line for the rest of this turn carries them (cleared in a post-hook).
     """
+    from ..config import get_settings
     from ..log import bind_request_context
+    from ..middleware import current_request_channel
     from ..observability import enrich_current_trace
 
     session_id = getattr(run_context, "session_id", None) if run_context else None
     turns = run_context.session_state.get("turns") if run_context else None
+    meta = metadata or (getattr(run_context, "metadata", None) if run_context else None) or {}
 
     bind_request_context(user_id=user_id, session_id=session_id)
+
+    header_channel = current_request_channel()
 
     enrich_current_trace(
         user_id=user_id,
         session_id=session_id,
-        # Real agents add tenant/channel/plan/etc. here (per-request context):
+        channel=meta.get("channel")
+        or (header_channel.type if header_channel else None)
+        or get_settings().channel,
+        channel_version=header_channel.version if header_channel else None,
+        channel_instance=meta.get("channel_instance")
+        or (header_channel.instance if header_channel else None),
+        # Real agents add tenant/plan/request-source/etc. here (per-request context):
         metadata={"turn": turns},
     )
 

@@ -79,6 +79,8 @@ def test_baseline_dispatch_returns_reply(monkeypatch, tmp_path):
     # baseline mode carries no A/B tags
     assert "ab_variant" not in captured["metadata"]
     assert captured["metadata"]["channel"] == "whatsapp"
+    # instance id → channel_instance (the omni deployment that served it)
+    assert captured["metadata"]["channel_instance"] == "i1"
 
 
 def test_ab_mode_tags_the_run(monkeypatch, tmp_path):

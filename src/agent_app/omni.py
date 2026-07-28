@@ -51,6 +51,7 @@ class _Chat(BaseModel):
 
 
 class _Instance(BaseModel):
+    id: str | None = None  # the Omni instance (deployment) that served the message
     channelType: str | None = None  # noqa: N815 — mirrors Omni's JSON field name
 
 
@@ -79,8 +80,11 @@ def register_omni_route(app: FastAPI, settings: Settings) -> None:
 
         user_id = body.sender.id
         session_id = body.chat.id or user_id
+        # channel/channel_instance are read by the enrich_trace pre-hook and
+        # stamped as bare span attributes (the platform's channel contract keys).
         metadata: dict[str, Any] = {
             "channel": body.instance.channelType,
+            "channel_instance": body.instance.id,
             "omni_trace_id": body.traceId,
         }
 

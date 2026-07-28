@@ -43,7 +43,13 @@ and this body (fields we use in **bold**):
 ```
 
 Our `/omni/webhook` (see `src/agent_app/omni.py`) maps `sender.id → user_id`,
-`chat.id → session_id`, runs the agent, and returns what round-trip mode expects:
+`chat.id → session_id`, runs the agent, and returns what round-trip mode expects.
+`instance.channelType`/`instance.id` travel as run metadata and the
+`enrich_trace` pre-hook stamps them on the trace as the bare `channel` /
+`channel.instance` attributes — so omni turns are attributed to their real
+channel (whatsapp/discord/…) on the observability platform, while other runs
+resolve via the `X-Channel-Type`/`-Version`/`-Instance` request headers or the
+`CHANNEL` env default (see [observability.md](observability.md) §5):
 
 ```json
 { "reply": "milk: R$4.50" }
