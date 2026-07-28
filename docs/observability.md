@@ -1,54 +1,74 @@
 # Observability via the connector register
 
 The agent is **vendor-neutral**: it knows nothing about LangWatch (or any other
-observability platform). It emits standard OTLP-over-HTTP traces and HTTP+JSON
-events to endpoints it resolves at runtime from a per-client **connector
-register**. The connector owns the contracts; the agent just plugs in.
+observability platform). It emits standard OTLP-over-HTTP traces to endpoints
+it resolves at runtime from the khal **connector-register**. The connector owns
+the contracts; the agent just plugs in.
 
-## 1. The one and only setting
+## 1. The two settings
 
 ```bash
 CONNECTOR_REGISTER_URL=https://connectorregister.<client>.example.com
+CONNECTOR_REGISTER_TOKEN=<M2M token>   # dev: a base64url claims token (see §7)
 ```
 
-Unset → tracing off (the app runs fine without it). Everything else — where
-traces/events go, with which credentials, for how long the answer is valid — is
-resolved from the register at runtime, so the platform can move hosts, rotate
-keys or swap vendors **without touching any agent config or restarting it**.
+Either unset → tracing off (the app runs fine without it; url without token
+logs one warning at boot). Everything else — where traces go, with which
+credentials, for how long the answer is valid — is resolved from the register
+at runtime, so the platform can move hosts, rotate keys or swap connectors
+**without touching any agent config or restarting it**.
 
-Never put a vendor endpoint or API key in the agent's env.
+Never put a vendor endpoint or API key in the agent's env. The token must
+carry the scopes `connectors.connection:resolve` plus the resolved connector's
+own `requiredScopes` (for traces: `monitoring.trace:write`).
 
-## 2. The register contract (v1)
+## 2. The register contract (capability resolution)
 
-`GET {CONNECTOR_REGISTER_URL}` — the env URL is the complete entry point,
-fetched verbatim; the agent never constructs URLs — returns a hypermedia
-document:
+`POST {CONNECTOR_REGISTER_URL}/connections` with an **intent** — the agent
+never asks for a connector by id; it states *what* it needs and *how* it can
+speak:
 
 ```json
 {
-  "version": "1",
-  "ttl_seconds": 300,
-  "links": {
-    "traces": {"href": "https://…/api/otel/v1/traces", "method": "POST",
-               "headers": {"Authorization": "Bearer sk-…"}},
-    "events": {"href": "https://…/api/track_event", "method": "POST",
-               "headers": {"X-Auth-Token": "sk-…"}}
-  }
+  "capability": {"signal": "monitoring.trace", "operation": "write"},
+  "binding": {"transport": "http", "protocol": "otlp", "encoding": "protobuf"}
 }
 ```
 
-Client obligations (implemented by `ConnectorClient` in
-[connector.py](../src/agent_app/connector.py)):
+→ a resolved connection:
 
-- **cache** the document for `ttl_seconds` (register-declared; default 300);
-- **re-fetch** on expiry *and* on link failure (`invalidate()`), so key
-  rotations and host moves propagate within the TTL;
-- treat `headers` as **opaque** — copied verbatim onto every request (this is
-  where auth lives; the agent never inspects it);
-- **ignore unknown links**; an absent link disables that capability;
-- **best-effort always**: a register outage never crashes or blocks the agent —
-  the batch/event is dropped, stale links keep serving, retries are throttled
-  (15 s).
+```json
+{
+  "connectorId": "langwatch-cliente",
+  "connectsTo": "monitoring",
+  "resolvedUrl": "https://…/api/otel/v1/traces",
+  "ttlSeconds": 900,
+  "chosenBinding": {"transport": "http", "protocol": "otlp", "encoding": "protobuf", "...": "..."},
+  "credential": {"placement": "header", "name": "authorization",
+                 "scheme": "Bearer", "value": "sk-…"}
+}
+```
+
+Link names map to intents in `_INTENTS` ([connector.py](../src/agent_app/connector.py)):
+`traces` → `monitoring.trace`/`write` over http/otlp/protobuf. `events` has
+**no signal in the platform vocabulary yet** — the capability is off (resolves
+to None without any HTTP call) until one exists.
+
+Client obligations (implemented by `ConnectorClient`):
+
+- **cache** each resolution for its `ttlSeconds` (credential freshness;
+  default 300 when absent) — the register is resolve-once, never a proxy;
+- **re-resolve** on expiry *and* on link failure (`invalidate()`), so key
+  rotations and connector moves propagate within the TTL;
+- **apply the credential where the response says**: `header` placement →
+  request header (`Bearer`/`Basic` prefix the scheme; `ApiKey` sends the bare
+  value — vendor headers like `X-Api-Key` take the raw key); `query` placement
+  → parameter appended to the resolved URL;
+- `404 no_connector_for_capability` → capability **off**, negative-cached so
+  the register isn't hammered; re-checked after the TTL;
+- **best-effort always**: a register outage or auth error never crashes or
+  blocks the agent — the batch is dropped, stale links keep serving, retries
+  are throttled (15 s); problem+json `code`s are logged.
 
 How the links are consumed ([observability.py](../src/agent_app/observability.py)):
 
@@ -56,8 +76,8 @@ How the links are consumed ([observability.py](../src/agent_app/observability.py
   (cached, so it's cheap) and lazily rebuilds the inner `OTLPSpanExporter`
   whenever `href`/`headers` change. Export failure → `invalidate()` → next
   batch re-resolves immediately.
-- `events` → `track_event()` POSTs the payload to `link.href` with the
-  register's headers plus `Content-Type: application/json`.
+- `events` → `track_event()` returns False while the capability is off (no
+  event signal on the platform yet).
 
 ## 3. What gets traced automatically
 
@@ -142,52 +162,58 @@ A/B arms are stamped the same way: `tag_experiment()` sets `ab.experiment` /
 
 `track_event(trace_id, event_type, metrics=…, details=…)` attaches real
 outcomes to the trace that produced them, through the register's `events`
-link. `POST /feedback` ([routes.py](../src/agent_app/routes.py)) is the wired
-example — point your UI's thumbs at it; get the `trace_id` from the run (or
-`current_trace_id()`). Absent `events` link → capability off, returns `False`.
+capability. `POST /feedback` ([routes.py](../src/agent_app/routes.py)) is the
+wired example — point your UI's thumbs at it; get the `trace_id` from the run
+(or `current_trace_id()`). The capability is **off** until the platform
+vocabulary gains an event signal → `track_event` returns `False`.
 
-## 7. Dev / local: LangWatch stack + a local register
+## 7. Dev / local: LangWatch stack + the real connector-register
 
-The template still ships a throwaway LangWatch instance for development:
+Dev runs the **real** khal connector-register — there is no mock. Three
+pieces:
+
+**a) LangWatch** (the trace store):
 
 ```bash
 make langwatch-up      # full stack: app(:5560)+workers+nlp+langevals+postgres+redis+clickhouse
 make langwatch-init    # DEV-ONLY: auto-creates account+org+project, writes LANGWATCH_API_KEY to .env
 ```
 
-`langwatch-init` (`scripts/langwatch_bootstrap.sh`) is idempotent and refuses
-to run when `ENVIRONMENT` is staging/prod. **The agent does not read
-`LANGWATCH_API_KEY`** — the key's job is to go into the *register document*.
-There's no register service in dev, so serve the document as a static file
-(this is the "mock connector"):
+**The agent does not read `LANGWATCH_API_KEY`** — the key's job is to be
+seeded into the register's dev vault.
+
+**b) The connector-register** (from the khal-platform monorepo), with the key
+seeded so resolutions carry the *real* credential (locally the vault is an
+in-memory fake — see khal-platform `docs/platform/connector-register/sops.md`):
 
 ```bash
-mkdir -p tmp/register && cat > tmp/register/index.json <<EOF
-{
-  "version": "1",
-  "ttl_seconds": 60,
-  "links": {
-    "traces": {"href": "http://localhost:5560/api/otel/v1/traces",
-               "headers": {"Authorization": "Bearer $LANGWATCH_API_KEY"}},
-    "events": {"href": "http://localhost:5560/api/track_event",
-               "headers": {"X-Auth-Token": "$LANGWATCH_API_KEY"}}
-  }
-}
-EOF
-python -m http.server 8765 -d tmp/register
+cd <khal-platform>
+VAULT_CREDENTIALS_JSON='{"workos-vault://langwatch-cliente":"<LANGWATCH_API_KEY>"}' \
+  pnpm --filter @khal/connector-register dev        # :7103 (NOT via turbo — strict env)
 ```
 
-Then run the agent with:
+Then register the connector (in-memory — repeat after every register restart):
 
 ```bash
-CONNECTOR_REGISTER_URL=http://localhost:8765/index.json make dev
+OTLP_ENDPOINT=http://localhost:5560/api/otel/v1/traces ./scripts/khal_register_connector.sh
 ```
 
-Every run is now traced into the local LangWatch UI at http://localhost:5560.
-Edit the JSON (new key, new host) and the agent picks it up within
-`ttl_seconds` — no restart. In staging/prod you don't do any of this: the
-platform team runs the real register; the agent gets only
-`CONNECTOR_REGISTER_URL` from the secrets manager.
+**c) The agent**, pointed at the register with a dev claims token (base64url
+JSON — the local register reads claims verbatim; production uses real M2M
+tokens from the Auth System):
+
+```bash
+export CONNECTOR_REGISTER_URL=http://127.0.0.1:7103
+export CONNECTOR_REGISTER_TOKEN=$(python3 -c "import base64,json;print(base64.urlsafe_b64encode(json.dumps({'tenant':'acme','client_id':'martino','scope':'connectors.connection:resolve monitoring.trace:write'}).encode()).decode().rstrip('='))")
+make dev
+```
+
+Every run is now traced into the local LangWatch. Rotate the key or move the
+connector (re-register with a new endpoint) and the agent picks it up within
+`ttlSeconds` — no restart. In staging/prod you don't do any of this: the
+platform team runs the register and the vault is real (WorkOS Vault); the
+agent gets `CONNECTOR_REGISTER_URL` + `CONNECTOR_REGISTER_TOKEN` from the
+secrets manager.
 
 ## Notes
 
@@ -198,9 +224,9 @@ platform team runs the real register; the agent gets only
 - The `langwatch` SDK itself is only a **qa extra** now, used by the offline
   evals ([evals/](../evals/)) which read `LANGWATCH_*` from their own env — the
   serving path never imports it.
-- Offline tests mock the register by monkeypatching `urllib.request.urlopen`
+- Offline tests fake the register by monkeypatching `urllib.request.urlopen`
   ([tests/test_observability.py](../tests/test_observability.py)) — same code
-  path, canned document, no network.
+  path, canned resolution documents, no network.
 
 ## Learn more
 

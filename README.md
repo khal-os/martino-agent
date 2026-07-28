@@ -78,9 +78,10 @@ make langwatch-up             # self-hosted LangWatch stack → http://localhost
 make langwatch-init           # DEV-ONLY: auto-creates project + writes LANGWATCH_API_KEY to .env
 ```
 The agent itself never reads `LANGWATCH_API_KEY` — tracing turns on via
-`CONNECTOR_REGISTER_URL`, which points at a **connector register** document
-holding the trace/event endpoints + credentials. In dev, serve that document as
-a static file (the "mock connector") and run — see
+`CONNECTOR_REGISTER_URL` + `CONNECTOR_REGISTER_TOKEN`, pointing at the khal
+**connector-register**, which resolves the trace endpoint + credential by
+capability (`POST /connections`). In dev you run the real register from the
+khal-platform monorepo with the LangWatch key seeded into its dev vault — see
 [`docs/observability.md`](docs/observability.md) §7 for the copy-paste steps:
 
 ```bash
