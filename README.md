@@ -78,7 +78,8 @@ make langwatch-up             # self-hosted LangWatch stack → http://localhost
 make langwatch-init           # DEV-ONLY: auto-creates project + writes LANGWATCH_API_KEY to .env
 ```
 The agent itself never reads `LANGWATCH_API_KEY` — tracing turns on via
-`CONNECTOR_REGISTER_URL` + `CONNECTOR_REGISTER_TOKEN`, pointing at the khal
+`CONNECTOR_REGISTER_URL` + `M2M_TOKEN` (the agent's identity token, issued by
+the agent-register when the agent is registered), pointing at the khal
 **connector-register**, which resolves the trace endpoint + credential by
 capability (`POST /connections`). In dev you run the real register from the
 khal-platform monorepo with the LangWatch key seeded into its dev vault — see

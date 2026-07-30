@@ -23,8 +23,8 @@ also arrive natively: the Agno instrumentor emits standard ``session.id`` /
 Auto-instrumentation: the Agno OpenInference instrumentor traces every run/LLM/
 tool call. Custom spans use a plain OTel tracer (see tools/example_tools.py).
 
-Enable with ``CONNECTOR_REGISTER_URL`` (the only env setting). No-op — and
-never crashes the app — when unset or when deps aren't installed.
+Enable with ``CONNECTOR_REGISTER_URL`` + ``M2M_TOKEN``. No-op — and
+never crashes the app — when either is unset or when deps aren't installed.
 """
 
 from __future__ import annotations
@@ -122,10 +122,10 @@ def setup_observability(settings: Settings) -> None:
     global _INITIALIZED, _CONNECTOR
     if _INITIALIZED or not settings.connector_register_url:
         return
-    if not settings.connector_register_token:
+    if not settings.m2m_token:
         # The register requires auth — url without token can never resolve.
         logger.warning(
-            "CONNECTOR_REGISTER_URL is set but CONNECTOR_REGISTER_TOKEN is not; "
+            "CONNECTOR_REGISTER_URL is set but M2M_TOKEN is not; "
             "tracing stays OFF (the connector register requires a token)."
         )
         return
@@ -135,9 +135,7 @@ def setup_observability(settings: Settings) -> None:
         from opentelemetry.sdk.trace import TracerProvider
         from opentelemetry.sdk.trace.export import BatchSpanProcessor
 
-        _CONNECTOR = ConnectorClient(
-            settings.connector_register_url, settings.connector_register_token
-        )
+        _CONNECTOR = ConnectorClient(settings.connector_register_url, settings.m2m_token)
 
         provider = TracerProvider(resource=Resource.create(_resource_attributes(settings)))
         provider.add_span_processor(BatchSpanProcessor(_ConnectorSpanExporter(_CONNECTOR)))

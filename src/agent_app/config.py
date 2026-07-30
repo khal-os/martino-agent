@@ -93,12 +93,16 @@ class Settings:
 
     # --- Observability (connector register) ---
     # The observability settings in the env: where the per-client khal
-    # connector-register lives and the token it requires. Either unset →
+    # connector-register lives and the agent's M2M token. Either unset →
     # tracing off. Everything else (trace endpoints, credentials, TTL) is
     # resolved from the register at runtime — never configure a vendor
     # address here. See connector.py and docs/observability.md.
     connector_register_url: str | None
-    connector_register_token: str | None  # M2M token (dev: base64url claims token)
+    # The agent's M2M identity token — issued by the agent-register when the
+    # FDE registers the agent (POST /agents/{clientId}/token) and pasted into
+    # the env. Used toward ALL khal services (registers, module), not only the
+    # connector register.
+    m2m_token: str | None
     # Trace metadata (rich by default):
     service_name: str  # OTel service.name (Resource) — was "unknown_service"
     agent_instance: str  # this deployment/replica (AGENT_INSTANCE, default: hostname)
@@ -155,7 +159,7 @@ def _from_env() -> Settings:
         # Local calendar date is intentional here (cache-key freshness, not a timestamp).
         build_date=os.getenv("BUILD_DATE", date.today().isoformat()),  # noqa: DTZ011
         connector_register_url=os.getenv("CONNECTOR_REGISTER_URL") or None,
-        connector_register_token=os.getenv("CONNECTOR_REGISTER_TOKEN") or None,
+        m2m_token=os.getenv("M2M_TOKEN") or None,
         service_name=os.getenv("OTEL_SERVICE_NAME") or os.getenv("AGENT_ID") or "assistant",
         agent_instance=os.getenv("AGENT_INSTANCE") or socket.gethostname(),
         environment=environment,

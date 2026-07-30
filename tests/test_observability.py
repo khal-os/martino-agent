@@ -292,7 +292,7 @@ def test_setup_observability_url_without_token_stays_off(monkeypatch):
     from agent_app.observability import setup_observability
 
     monkeypatch.setenv("CONNECTOR_REGISTER_URL", "http://register.local")
-    monkeypatch.delenv("CONNECTOR_REGISTER_TOKEN", raising=False)
+    monkeypatch.delenv("M2M_TOKEN", raising=False)
     config.get_settings.cache_clear()
 
     import agent_app.observability as obs

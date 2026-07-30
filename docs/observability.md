@@ -9,7 +9,7 @@ the contracts; the agent just plugs in.
 
 ```bash
 CONNECTOR_REGISTER_URL=https://connectorregister.<client>.example.com
-CONNECTOR_REGISTER_TOKEN=<M2M token>   # dev: a base64url claims token (see §7)
+M2M_TOKEN=<the agent's M2M token>   # issued by the agent-register (see §7)
 ```
 
 Either unset → tracing off (the app runs fine without it; url without token
@@ -18,9 +18,11 @@ credentials, for how long the answer is valid — is resolved from the register
 at runtime, so the platform can move hosts, rotate keys or swap connectors
 **without touching any agent config or restarting it**.
 
-Never put a vendor endpoint or API key in the agent's env. The token must
-carry the scopes `connectors.connection:resolve` plus the resolved connector's
-own `requiredScopes` (for traces: `monitoring.trace:write`).
+Never put a vendor endpoint or API key in the agent's env. `M2M_TOKEN` is the
+agent's **identity** token toward all khal services (registers and modules) —
+not a connector-register-specific secret. Its claims are
+`{tenant, client_id, client_secret}`; there are no scopes (the platform
+removed scope checks from the M2M model).
 
 ## 2. The register contract (capability resolution)
 
@@ -192,27 +194,41 @@ VAULT_CREDENTIALS_JSON='{"workos-vault://langwatch-cliente":"<LANGWATCH_API_KEY>
   pnpm --filter @khal/connector-register dev        # :7103 (NOT via turbo — strict env)
 ```
 
-Then register the connector (in-memory — repeat after every register restart):
+Then register the connector (in-memory — repeat after every register restart;
+the script lives with the connector, in observability-module):
 
 ```bash
-OTLP_ENDPOINT=http://localhost:5560/api/otel/v1/traces ./scripts/khal_register_connector.sh
+OTLP_ENDPOINT=http://localhost:5560/api/otel/v1/traces \
+  ../observability-module/scripts/connector/register.sh
 ```
 
-**c) The agent**, pointed at the register with a dev claims token (base64url
-JSON — the local register reads claims verbatim; production uses real M2M
-tokens from the Auth System):
+**c) The agent**, pointed at the register with its M2M token. The token is
+issued by the **agent-register** when the agent is registered
+(`scripts/khal_register_agent.sh`, then the token route):
 
 ```bash
 export CONNECTOR_REGISTER_URL=http://127.0.0.1:7103
-export CONNECTOR_REGISTER_TOKEN=$(python3 -c "import base64,json;print(base64.urlsafe_b64encode(json.dumps({'tenant':'acme','client_id':'martino','scope':'connectors.connection:resolve monitoring.trace:write'}).encode()).decode().rstrip('='))")
+export M2M_TOKEN=$(curl -s -X POST http://127.0.0.1:7104/agents/martino/token \
+  -H 'content-type: application/json' \
+  -d '{"tenant":"acme","client_secret":"<secret from the agent PUT>"}' \
+  | python3 -c "import json,sys;print(json.load(sys.stdin)['token'])")
 make dev
 ```
+
+> **LEGACY — works today, delete once the platform ships the token route +
+> scope removal (SPEC-1/3).** The local register still enforces scopes and has
+> no token route yet, so mint a dev claims token (base64url JSON, read
+> verbatim) with the scopes instead:
+>
+> ```bash
+> export M2M_TOKEN=$(python3 -c "import base64,json;print(base64.urlsafe_b64encode(json.dumps({'tenant':'acme','client_id':'martino','scope':'connectors.connection:resolve monitoring.trace:write'}).encode()).decode().rstrip('='))")
+> ```
 
 Every run is now traced into the local LangWatch. Rotate the key or move the
 connector (re-register with a new endpoint) and the agent picks it up within
 `ttlSeconds` — no restart. In staging/prod you don't do any of this: the
 platform team runs the register and the vault is real (WorkOS Vault); the
-agent gets `CONNECTOR_REGISTER_URL` + `CONNECTOR_REGISTER_TOKEN` from the
+agent gets `CONNECTOR_REGISTER_URL` + `M2M_TOKEN` from the
 secrets manager.
 
 ## Notes

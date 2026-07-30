@@ -1,9 +1,10 @@
 """Connector register client — capability resolution at runtime (khal platform).
 
 The agent's env carries TWO observability settings: ``CONNECTOR_REGISTER_URL``
-(the khal connector-register base URL) and ``CONNECTOR_REGISTER_TOKEN`` (the
-Bearer token the register requires — an M2M token in real deployments, a
-base64url dev-claims token locally). Everything else — where traces go, with
+(the khal connector-register base URL) and ``M2M_TOKEN`` (the agent's M2M
+identity token, sent as Bearer — issued by the agent-register when the FDE
+registers the agent; a base64url dev-claims token locally). Everything else
+— where traces go, with
 which credentials — is resolved from the register at runtime, so the platform
 can move hosts, rotate keys or swap vendors without touching agent config.
 

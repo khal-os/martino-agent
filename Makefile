@@ -4,7 +4,7 @@
         net up down restart logs ps docker-build prod-up prod-down \
         langwatch-up langwatch-init langwatch-down stack-up stack-down \
         aws-up aws-redeploy aws-down aws-secrets aws-logs \
-        clean deploy
+        clean deploy bump register-agent
 
 # ─── Meta ────────────────────────────────────────────────────────────────────
 
@@ -21,6 +21,12 @@ install-obs: ## Also install observability + QA extras (langwatch, scenario, pan
 
 dev: ## Run locally with hot reload (single process; SQLite unless DATABASE_URL set)
 	uv run uvicorn agent_app.main:app --host 0.0.0.0 --port 8888 --reload
+
+bump: ## Bump the agent version (PART=major|minor|patch, default patch)
+	./scripts/bump_version.sh $(or $(PART),patch)
+
+register-agent: ## Register this agent (+ its version) in the khal agent-register
+	./scripts/khal_register_agent.sh
 
 run: ## Run locally like prod (workers, no reload)
 	uv run uvicorn agent_app.main:app --host 0.0.0.0 --port 8888 --workers 2
