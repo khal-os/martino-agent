@@ -25,7 +25,7 @@ dev: ## Run locally with hot reload (single process; SQLite unless DATABASE_URL 
 bump: ## Bump the agent version (PART=major|minor|patch, default patch)
 	./scripts/bump_version.sh $(or $(PART),patch)
 
-register-agent: ## Register this agent (+ its version) in the khal agent-register
+register-agent: ## Register this agent (+ its version) in the khal Agent Catalog
 	./scripts/khal_register_agent.sh
 
 run: ## Run locally like prod (workers, no reload)

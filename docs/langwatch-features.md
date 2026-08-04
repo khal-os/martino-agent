@@ -8,7 +8,7 @@ and what's **out of scope** for a starter.
 
 | Feature | How | Where | Run |
 |---|---|---|---|
-| **Tracing** (auto) | OpenInference `AgnoInstrumentor` → every run/LLM/tool span | `observability.py` | on when `CONNECTOR_REGISTER_URL` + `M2M_TOKEN` are set |
+| **Tracing** (auto) | OpenInference `AgnoInstrumentor` → every run/LLM/tool span | `observability.py` | on when `CONNECTOR_CATALOG_URL` + `M2M_TOKEN` are set |
 | **Custom spans** | plain OTel tracer + `openinference.span.kind` around sub-steps | `tools/example_tools.py::lookup_price` | ↑ |
 | **Rich metadata** | Resource (service/version/env/model/domain) + per-request span attrs (user/thread/`channel.*`/`ab.*`/`app.*`; channel via omni or `X-Channel-*` headers) | `observability.py`, `hooks/pre_hooks.py::enrich_trace`, `middleware.py` | ↑ |
 | **Custom user events** | connector `events` link → `/api/track_event` (👍/👎, ratings, "converted") | `observability.py::track_event`, `POST /feedback` | app endpoint |

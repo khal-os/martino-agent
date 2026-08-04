@@ -91,17 +91,18 @@ class Settings:
     cache_extended_ttl: bool
     build_date: str
 
-    # --- Observability (connector register) ---
+    # --- Observability (Connector Catalog) ---
     # The observability settings in the env: where the per-client khal
-    # connector-register lives and the agent's M2M token. Either unset →
+    # Connector Catalog lives and the agent's M2M token. Either unset →
     # tracing off. Everything else (trace endpoints, credentials, TTL) is
-    # resolved from the register at runtime — never configure a vendor
+    # resolved from the catalog at runtime — never configure a vendor
     # address here. See connector.py and docs/observability.md.
-    connector_register_url: str | None
-    # The agent's M2M identity token — issued by the agent-register when the
+    connector_catalog_url: str | None
+    # The agent's M2M identity token — issued by the Agent Catalog when the
     # FDE registers the agent (POST /agents/{clientId}/token) and pasted into
-    # the env. Used toward ALL khal services (registers, module), not only the
-    # connector register.
+    # the env. Used toward ALL khal services (catalogs, module), not only the
+    # Connector Catalog. Auth is identity-only: valid token + right tenant —
+    # there are no scopes in the M2M model.
     m2m_token: str | None
     # Trace metadata (rich by default):
     service_name: str  # OTel service.name (Resource) — was "unknown_service"
@@ -158,7 +159,11 @@ def _from_env() -> Settings:
         cache_extended_ttl=_flag("CACHE_EXTENDED_TTL", default=True),
         # Local calendar date is intentional here (cache-key freshness, not a timestamp).
         build_date=os.getenv("BUILD_DATE", date.today().isoformat()),  # noqa: DTZ011
-        connector_register_url=os.getenv("CONNECTOR_REGISTER_URL") or None,
+        # CONNECTOR_REGISTER_URL is the pre-Catalog-rename spelling; the
+        # fallback keeps existing deployments working (evolução aditiva).
+        connector_catalog_url=os.getenv("CONNECTOR_CATALOG_URL")
+        or os.getenv("CONNECTOR_REGISTER_URL")
+        or None,
         m2m_token=os.getenv("M2M_TOKEN") or None,
         service_name=os.getenv("OTEL_SERVICE_NAME") or os.getenv("AGENT_ID") or "assistant",
         agent_instance=os.getenv("AGENT_INSTANCE") or socket.gethostname(),

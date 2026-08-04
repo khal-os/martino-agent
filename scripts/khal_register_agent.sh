@@ -1,26 +1,43 @@
 #!/usr/bin/env bash
-# DEV-ONLY: (re-)registers this agent in a LOCAL khal agent-register. The
-# register is the source of truth for the deployed app VERSION — the manifest's
-# `version` is read from src/agent_app/_version.py automatically, so run this
-# after every bump/deploy (scripts/bump_version.sh).
+# (Re-)registers this agent in the khal Agent Catalog. The catalog is the
+# source of truth for the deployed app VERSION — the manifest's `version` is
+# read from src/agent_app/_version.py automatically, so run this after every
+# bump/deploy (scripts/bump_version.sh).
 #
-# In the target platform flow (SPEC-1), this PUT also provisions the agent's
-# M2M credential in the Auth System; the returned client_secret then feeds
-# POST /agents/{id}/token, whose token goes into the agent's M2M_TOKEN env.
+# This is the "CD acting as the agent" step of the platform flow: in CI the
+# pipeline holds the agent's M2M credential and updates the agent's own
+# manifest with it. Auth is identity-only (valid token + right tenant) —
+# there are NO scopes in the M2M model.
 #
-# The local register stores manifests IN MEMORY — run this again after every
+# Token precedence:
+#   1. TOKEN                     — explicit token, used as-is
+#   2. M2M_CLIENT_ID/SECRET      — with AUTH_SYSTEM_URL: a session is requested
+#                                  from the M2M Auth System (client_credentials;
+#                                  sessions expire — each run requests a fresh
+#                                  one, there is no renew)
+#   3. dev claims token          — minted below (base64url JSON, no scopes)
+#
+# LEGACY-COMPAT: today's local catalog still guards routes by scope; a
+# scopeless PUT answers 403. When that happens (and only for the minted dev
+# token) the script retries ONCE with the legacy scoped claims and warns.
+# Delete the fallback when the platform drops scope checks.
+#
+# The local catalog stores manifests IN MEMORY — run this again after every
 # dev-server restart. Idempotent: an existing agent is updated in place
 # (ETag/If-Match handled automatically).
 #
 # Env overrides (all optional):
-#   REGISTER_URL  default http://127.0.0.1:7104 (the agent-register)
-#   TENANT        default acme
-#   AGENT_ID      default martino
-#   TOKEN         a USER token for the PUT (registration is a user action).
-#                 Unset → dev claims token minted below.
+#   CATALOG_URL      default http://127.0.0.1:7104 (the Agent Catalog;
+#                    legacy spelling REGISTER_URL still honored)
+#   TENANT           default acme
+#   AGENT_ID         default martino
+#   AUTH_SYSTEM_URL  the M2M Auth System base URL (enables the session path)
+#   M2M_CLIENT_ID    the agent's M2M credential id
+#   M2M_CLIENT_SECRET  the agent's M2M credential secret
+#   TOKEN            explicit token for the PUT (wins over everything)
 set -euo pipefail
 
-REGISTER_URL="${REGISTER_URL:-http://127.0.0.1:7104}"
+CATALOG_URL="${CATALOG_URL:-${REGISTER_URL:-http://127.0.0.1:7104}}"
 TENANT="${TENANT:-acme}"
 AGENT_ID="${AGENT_ID:-martino}"
 
@@ -30,11 +47,38 @@ AGENT_ID="${AGENT_ID:-martino}"
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 VERSION=$(python3 -c "import re,sys;print(re.search(r'__version__ = \"([^\"]+)\"', open(sys.argv[1]).read()).group(1))" "$ROOT/src/agent_app/_version.py")
 
-# LEGACY until SPEC-3 lands: the local register still guards routes by scope
-# (agents:read / agents:write), so the dev claims token carries them. Once the
-# platform removes scopes, drop the scope field here. A real user token can be
-# passed via TOKEN instead.
-TOKEN="${TOKEN:-$(python3 -c "import base64,json,sys;print(base64.urlsafe_b64encode(json.dumps({'tenant':sys.argv[1],'client_id':'khal-register-agent.sh','scope':'agents:read agents:write'}).encode()).decode().rstrip('='))" "$TENANT")}"
+# Session from the M2M Auth System (the target platform flow): credentials in,
+# short-lived session out. No scopes are requested — identity only.
+m2m_session() {
+  curl -sS -X POST "${AUTH_SYSTEM_URL%/}/token" \
+    -H 'content-type: application/x-www-form-urlencoded' \
+    --data-urlencode 'grant_type=client_credentials' \
+    --data-urlencode "client_id=${M2M_CLIENT_ID}" \
+    --data-urlencode "client_secret=${M2M_CLIENT_SECRET}" \
+    | python3 -c "import json,sys;print(json.load(sys.stdin)['access_token'])"
+}
+
+# Dev claims token (base64url JSON read verbatim by the local catalog).
+# scope argument: empty = the real model (no scopes); non-empty = LEGACY-COMPAT.
+dev_token() {
+  python3 -c "
+import base64, json, sys
+claims = {'tenant': sys.argv[1], 'client_id': 'khal-register-agent.sh'}
+if sys.argv[2]:
+    claims['scope'] = sys.argv[2]
+print(base64.urlsafe_b64encode(json.dumps(claims).encode()).decode().rstrip('='))" "$TENANT" "$1"
+}
+
+MINTED=""
+if [[ -n "${TOKEN:-}" ]]; then
+  :
+elif [[ -n "${AUTH_SYSTEM_URL:-}" && -n "${M2M_CLIENT_ID:-}" && -n "${M2M_CLIENT_SECRET:-}" ]]; then
+  TOKEN="$(m2m_session)"
+  echo "session obtained from the M2M Auth System (${AUTH_SYSTEM_URL})"
+else
+  TOKEN="$(dev_token "")"
+  MINTED=1
+fi
 
 MANIFEST=$(cat <<EOF
 {
@@ -54,16 +98,31 @@ MANIFEST=$(cat <<EOF
 EOF
 )
 
-# Existing agent? Grab its ETag so the update satisfies If-Match.
-ETAG=$(curl -s -o /dev/null -w '%{header_json}' \
-  -H "Authorization: Bearer ${TOKEN}" \
-  "${REGISTER_URL}/agents/${AGENT_ID}" \
-  | python3 -c "import json,sys;h=json.load(sys.stdin);print((h.get('etag') or [''])[0])")
+# One registration attempt with the given token; prints the body, returns the
+# HTTP status via the global CODE. Existing agent → ETag satisfies If-Match.
+BODY_FILE="$(mktemp)"
+trap 'rm -f "$BODY_FILE"' EXIT
+attempt() {
+  local token="$1"
+  local etag
+  etag=$(curl -s -o /dev/null -w '%{header_json}' \
+    -H "Authorization: Bearer ${token}" \
+    "${CATALOG_URL}/agents/${AGENT_ID}" \
+    | python3 -c "import json,sys;h=json.load(sys.stdin);print((h.get('etag') or [''])[0])")
+  local args=(-sS -X PUT "${CATALOG_URL}/agents/${AGENT_ID}"
+    -H "Authorization: Bearer ${token}" -H 'content-type: application/json'
+    -o "$BODY_FILE" -w '%{http_code}' -d "${MANIFEST}")
+  [[ -n "$etag" ]] && args+=(-H "If-Match: ${etag}")
+  CODE=$(curl "${args[@]}")
+}
 
-ARGS=(-sS -X PUT "${REGISTER_URL}/agents/${AGENT_ID}"
-  -H "Authorization: Bearer ${TOKEN}" -H 'content-type: application/json'
-  -w '\nHTTP %{http_code}\n' -d "${MANIFEST}")
-[[ -n "$ETAG" ]] && ARGS+=(-H "If-Match: ${ETAG}")
+attempt "$TOKEN"
+if [[ "$CODE" == "403" && -n "$MINTED" ]]; then
+  echo "WARN: catalog still guards routes by scope (LEGACY) — retrying with scoped dev claims" >&2
+  attempt "$(dev_token "agents:read agents:write")"
+fi
 
-curl "${ARGS[@]}"
-echo "agent '${AGENT_ID}' v${VERSION} registered at ${REGISTER_URL} (tenant ${TENANT})"
+cat "$BODY_FILE"; echo
+echo "HTTP ${CODE}"
+[[ "$CODE" =~ ^2 ]] || { echo "ERROR: registration failed"; exit 1; }
+echo "agent '${AGENT_ID}' v${VERSION} registered at ${CATALOG_URL} (tenant ${TENANT})"

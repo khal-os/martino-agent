@@ -156,15 +156,21 @@ def test_connector_client_resolves_traces_via_connections(monkeypatch):
     monkeypatch.setattr(
         connector_mod.urllib.request, "urlopen", _capturing_urlopen([_resolution()], calls)
     )
-    client = ConnectorClient("http://register.local", "tkn")
+    client = ConnectorClient("http://catalog.local", "tkn")
     link = client.link("traces")
 
-    # The intent went to POST /connections with the register token.
-    assert calls[0].full_url == "http://register.local/connections"
+    # The intent went to POST /connections with the catalog token — the full
+    # usage-intent tuple (incl. protocolVersion).
+    assert calls[0].full_url == "http://catalog.local/connections"
     assert calls[0].get_header("Authorization") == "Bearer tkn"
     body = json.loads(calls[0].data.decode())
     assert body["capability"] == {"signal": "monitoring.trace", "operation": "write"}
-    assert body["binding"] == {"transport": "http", "protocol": "otlp", "encoding": "protobuf"}
+    assert body["binding"] == {
+        "transport": "http",
+        "protocol": "otlp",
+        "protocolVersion": "1.0",
+        "encoding": "protobuf",
+    }
 
     # The link is the resolved endpoint with the credential applied.
     assert link is not None
@@ -291,7 +297,7 @@ def test_setup_observability_url_without_token_stays_off(monkeypatch):
     from agent_app import config
     from agent_app.observability import setup_observability
 
-    monkeypatch.setenv("CONNECTOR_REGISTER_URL", "http://register.local")
+    monkeypatch.setenv("CONNECTOR_CATALOG_URL", "http://catalog.local")
     monkeypatch.delenv("M2M_TOKEN", raising=False)
     config.get_settings.cache_clear()
 
@@ -299,4 +305,16 @@ def test_setup_observability_url_without_token_stays_off(monkeypatch):
 
     setup_observability(config.get_settings())
     assert obs._INITIALIZED is False  # tracing off, no crash
+    config.get_settings.cache_clear()
+
+
+def test_connector_catalog_url_falls_back_to_legacy_env(monkeypatch):
+    """CONNECTOR_REGISTER_URL (pre-Catalog-rename) still turns tracing on."""
+    from agent_app import config
+
+    monkeypatch.delenv("CONNECTOR_CATALOG_URL", raising=False)
+    monkeypatch.setenv("CONNECTOR_REGISTER_URL", "http://legacy.local")
+    config.get_settings.cache_clear()
+
+    assert config.get_settings().connector_catalog_url == "http://legacy.local"
     config.get_settings.cache_clear()

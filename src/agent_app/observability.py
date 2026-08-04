@@ -2,7 +2,7 @@
 
 The agent knows NOTHING about the observability vendor. It emits standard
 OTLP-over-HTTP traces and HTTP+JSON events to endpoints resolved at runtime
-from the per-client **connector register** (see connector.py). Only the
+from the per-client **Connector Catalog** (see connector.py). Only the
 TRANSPORT is connector-aware — the PAYLOAD is whatever the instrumentation
 naturally produces; adapting it to a platform's conventions is the connector
 side's job, never the agent's:
@@ -23,7 +23,7 @@ also arrive natively: the Agno instrumentor emits standard ``session.id`` /
 Auto-instrumentation: the Agno OpenInference instrumentor traces every run/LLM/
 tool call. Custom spans use a plain OTel tracer (see tools/example_tools.py).
 
-Enable with ``CONNECTOR_REGISTER_URL`` + ``M2M_TOKEN``. No-op — and
+Enable with ``CONNECTOR_CATALOG_URL`` + ``M2M_TOKEN``. No-op — and
 never crashes the app — when either is unset or when deps aren't installed.
 """
 
@@ -79,12 +79,12 @@ def _resource_attributes(settings: Settings) -> dict[str, Any]:
 
 
 class _ConnectorSpanExporter:
-    """OTLP exporter whose destination is resolved via the connector register.
+    """OTLP exporter whose destination is resolved via the Connector Catalog.
 
     Each batch export asks the ConnectorClient for the current ``traces`` link
     (cached, so this is cheap) and lazily (re)builds the inner OTLP exporter
     when the link changes — host moves and key rotations propagate within the
-    register's TTL, with no agent restart. On export failure the document is
+    catalog's TTL, with no agent restart. On export failure the document is
     invalidated so the next batch re-resolves immediately.
     """
 
@@ -120,13 +120,13 @@ class _ConnectorSpanExporter:
 
 def setup_observability(settings: Settings) -> None:
     global _INITIALIZED, _CONNECTOR
-    if _INITIALIZED or not settings.connector_register_url:
+    if _INITIALIZED or not settings.connector_catalog_url:
         return
     if not settings.m2m_token:
-        # The register requires auth — url without token can never resolve.
+        # The catalog requires auth — url without token can never resolve.
         logger.warning(
-            "CONNECTOR_REGISTER_URL is set but M2M_TOKEN is not; "
-            "tracing stays OFF (the connector register requires a token)."
+            "CONNECTOR_CATALOG_URL is set but M2M_TOKEN is not; "
+            "tracing stays OFF (the Connector Catalog requires a token)."
         )
         return
     try:
@@ -135,7 +135,7 @@ def setup_observability(settings: Settings) -> None:
         from opentelemetry.sdk.trace import TracerProvider
         from opentelemetry.sdk.trace.export import BatchSpanProcessor
 
-        _CONNECTOR = ConnectorClient(settings.connector_register_url, settings.m2m_token)
+        _CONNECTOR = ConnectorClient(settings.connector_catalog_url, settings.m2m_token)
 
         provider = TracerProvider(resource=Resource.create(_resource_attributes(settings)))
         provider.add_span_processor(BatchSpanProcessor(_ConnectorSpanExporter(_CONNECTOR)))
@@ -153,8 +153,8 @@ def setup_observability(settings: Settings) -> None:
 
         _INITIALIZED = True
         logger.info(
-            "observability enabled → register=%s (service=%s env=%s)",
-            settings.connector_register_url,
+            "observability enabled → catalog=%s (service=%s env=%s)",
+            settings.connector_catalog_url,
             settings.service_name,
             settings.environment,
         )
@@ -263,7 +263,7 @@ def track_event(
     "escalated" — get attached to the trace that produced them, so you can
     slice quality by real outcomes. ``trace_id`` comes from the run (see
     ``current_trace_id()``). The destination and credentials come from the
-    connector register; absent link → capability off, returns False.
+    Connector Catalog; absent link → capability off, returns False.
 
     Returns True on success; never raises (telemetry must not break the app).
     """
@@ -284,7 +284,7 @@ def track_event(
             "event_details": details or {},
             "timestamp": int(time.time() * 1000),
         }
-        req = urllib.request.Request(  # noqa: S310 — register-resolved connector endpoint
+        req = urllib.request.Request(  # noqa: S310 — catalog-resolved connector endpoint
             link.href,
             data=json.dumps(payload).encode(),
             headers={**link.headers, "Content-Type": "application/json"},

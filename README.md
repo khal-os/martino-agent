@@ -78,15 +78,15 @@ make langwatch-up             # self-hosted LangWatch stack → http://localhost
 make langwatch-init           # DEV-ONLY: auto-creates project + writes LANGWATCH_API_KEY to .env
 ```
 The agent itself never reads `LANGWATCH_API_KEY` — tracing turns on via
-`CONNECTOR_REGISTER_URL` + `M2M_TOKEN` (the agent's identity token, issued by
-the agent-register when the agent is registered), pointing at the khal
-**connector-register**, which resolves the trace endpoint + credential by
-capability (`POST /connections`). In dev you run the real register from the
+`CONNECTOR_CATALOG_URL` + `M2M_TOKEN` (the agent's identity token, issued by
+the Agent Catalog when the agent is registered), pointing at the khal
+**Connector Catalog**, which resolves the trace endpoint + credential by
+capability (`POST /connections`). In dev you run the real catalog from the
 khal-platform monorepo with the LangWatch key seeded into its dev vault — see
 [`docs/observability.md`](docs/observability.md) §7 for the copy-paste steps:
 
 ```bash
-make dev                      # with the register up: every run is traced (tokens, cost, tools, spans)
+make dev                      # with the catalog up: every run is traced (tokens, cost, tools, spans)
 ```
 `make scenario` and `make experiment` (the LangWatch QA lanes) also need `make install-obs`.
 

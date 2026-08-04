@@ -23,6 +23,7 @@ def build(monkeypatch, *, api_key=None, environment="dev"):
     else:
         monkeypatch.setenv("API_KEY", api_key)
     monkeypatch.setenv("ENVIRONMENT", environment)
+    monkeypatch.delenv("CONNECTOR_CATALOG_URL", raising=False)
     monkeypatch.delenv("CONNECTOR_REGISTER_URL", raising=False)
     config.get_settings.cache_clear()
     import agent_app.main as main
@@ -135,8 +136,8 @@ def test_feedback_accepts_valid_trace_id_noop_when_disabled(monkeypatch):
 def _restore_main():
     """Leave agent_app.main in its default (dev, no key, no telemetry) state.
 
-    Force the connector register off on the restoring reload so a real `.env`
-    (CONNECTOR_REGISTER_URL set) can't make the reloaded module fire OTel
+    Force the Connector Catalog off on the restoring reload so a real `.env`
+    (CONNECTOR_CATALOG_URL set) can't make the reloaded module fire OTel
     exports during teardown.
     """
     import os
@@ -144,6 +145,7 @@ def _restore_main():
     yield
     import agent_app.main as main
 
+    os.environ.pop("CONNECTOR_CATALOG_URL", None)
     os.environ.pop("CONNECTOR_REGISTER_URL", None)
     config.get_settings.cache_clear()
     importlib.reload(main)

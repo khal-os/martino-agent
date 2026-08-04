@@ -300,6 +300,7 @@ def test_pre_hook_tags_from_run_metadata(monkeypatch):
 def client(monkeypatch, tmp_path):
     monkeypatch.delenv("API_KEY", raising=False)
     monkeypatch.setenv("ENVIRONMENT", "dev")
+    monkeypatch.delenv("CONNECTOR_CATALOG_URL", raising=False)
     monkeypatch.delenv("CONNECTOR_REGISTER_URL", raising=False)
     monkeypatch.setenv("EXPERIMENTS_STORE_PATH", str(tmp_path / "alloc.json"))
     config.get_settings.cache_clear()
@@ -405,6 +406,7 @@ def _restore_main():
     import os
 
     yield
+    os.environ.pop("CONNECTOR_CATALOG_URL", None)
     os.environ.pop("CONNECTOR_REGISTER_URL", None)
     config.get_settings.cache_clear()
     import agent_app.main as main

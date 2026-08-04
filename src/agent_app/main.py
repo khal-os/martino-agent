@@ -60,7 +60,7 @@ agent_os = AgentOS(
     # Agno native tracing: every run/LLM-call/tool-call is stored as spans in the
     # agents' own db (agno_traces / agno_spans tables) — free, offline, no extra
     # infra, browsable via the AgentOS API / os.agno.com. Complements the
-    # connector-resolved OTLP export enabled separately via CONNECTOR_REGISTER_URL.
+    # connector-resolved OTLP export enabled separately via CONNECTOR_CATALOG_URL.
     tracing=True,
 )
 app: FastAPI = agent_os.get_app()

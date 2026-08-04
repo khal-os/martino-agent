@@ -2,7 +2,7 @@
 # Bumps the agent version in src/agent_app/_version.py — the single source
 # everything reads (package, pyproject/hatch, /health, trace Resource).
 # After bumping, push the new version to the platform with
-# scripts/khal_register_agent.sh (the agent-register is the source of truth
+# scripts/khal_register_agent.sh (the Agent Catalog is the source of truth
 # for the deployed app version).
 #
 # Usage: scripts/bump_version.sh <major|minor|patch>

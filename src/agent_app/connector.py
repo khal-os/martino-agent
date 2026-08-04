@@ -1,33 +1,38 @@
-"""Connector register client — capability resolution at runtime (khal platform).
+"""Connector Catalog client — capability resolution at runtime (khal platform).
 
-The agent's env carries TWO observability settings: ``CONNECTOR_REGISTER_URL``
-(the khal connector-register base URL) and ``M2M_TOKEN`` (the agent's M2M
-identity token, sent as Bearer — issued by the agent-register when the FDE
-registers the agent; a base64url dev-claims token locally). Everything else
+The agent's env carries TWO observability settings: ``CONNECTOR_CATALOG_URL``
+(the khal Connector Catalog base URL) and ``M2M_TOKEN`` (the agent's M2M
+identity token, sent as Bearer — issued by the Agent Catalog when the FDE
+registers the agent; a base64url dev-claims token locally). Auth is
+identity-only (valid token + right tenant — no scopes). Everything else
 — where traces go, with
-which credentials — is resolved from the register at runtime, so the platform
+which credentials — is resolved from the catalog at runtime, so the platform
 can move hosts, rotate keys or swap vendors without touching agent config.
 
-Contract: ``POST {CONNECTOR_REGISTER_URL}/connections`` with an *intent* —
-the capability the agent needs plus how it knows how to speak::
+Contract: ``POST {CONNECTOR_CATALOG_URL}/connections`` with an *intent* —
+the capability the agent needs plus how it knows how to speak (the full
+usage-intent tuple: signal, operation, transport, protocol, protocol
+version, encoding)::
 
     {"capability": {"signal": "monitoring.trace", "operation": "write"},
-     "binding": {"transport": "http", "protocol": "otlp", "encoding": "protobuf"}}
+     "binding": {"transport": "http", "protocol": "otlp",
+                 "protocolVersion": "1.0", "encoding": "protobuf"}}
 
 → ``{connectorId, connectsTo, resolvedUrl, ttlSeconds, chosenBinding,
 credential?: {placement, name, scheme, value}}``. The agent never asks for a
 connector by id; it states what it needs and receives a resolved connection
 with a short-lived credential. After that the agent talks straight to the
-connector — the register is never in the event path.
+connector — the catalog is never in the event path.
 
 Client obligations:
   * cache each resolution for its ``ttlSeconds`` (credential freshness);
-  * re-resolve on expiry AND on link failure (``invalidate()``);
+  * re-resolve on expiry AND on link failure (``invalidate()``) — there is
+    no session renew in the M2M model: expired means resolve again;
   * apply the credential where the response says (header or query) — the
-    register tells *where*, the client applies it;
+    catalog tells *where*, the client applies it;
   * a capability with no connector (404 ``no_connector_for_capability``) is
-    OFF — negative-cached so the register isn't hammered;
-  * best-effort always: the register being down must never crash or block
+    OFF — negative-cached so the catalog isn't hammered;
+  * best-effort always: the catalog being down must never crash or block
     the agent — ``link()`` just returns None and we retry later (throttled).
 
 Link names map to intents via ``_INTENTS``. ``events`` has no signal in the
@@ -54,13 +59,21 @@ _FAILURE_RETRY_S = 15.0  # min interval between attempts after a failure
 _FETCH_TIMEOUT_S = 5.0
 
 # Link name → resolution intent. The agent states WHAT it needs (capability)
-# and HOW it can speak (binding); the register picks the connector.
+# and HOW it can speak (binding); the catalog picks the connector.
+# ``protocolVersion`` completes the usage-intent tuple — the catalog only
+# matches a connector whose binding declares the same version (an omitted
+# version on the intent side would match any).
 # ``events``: intentionally absent — the platform vocabulary has no event
 # signal yet (only monitoring.trace / billing.usage); capability off.
 _INTENTS: Final[dict[str, dict[str, dict[str, str]]]] = {
     "traces": {
         "capability": {"signal": "monitoring.trace", "operation": "write"},
-        "binding": {"transport": "http", "protocol": "otlp", "encoding": "protobuf"},
+        "binding": {
+            "transport": "http",
+            "protocol": "otlp",
+            "protocolVersion": "1.0",
+            "encoding": "protobuf",
+        },
     },
 }
 
@@ -81,7 +94,7 @@ class _CacheEntry:
 
 
 def _credential_headers_and_href(resolution: dict[str, Any]) -> tuple[dict[str, str], str]:
-    """Apply the credential where the register says it belongs.
+    """Apply the credential where the catalog says it belongs.
 
     * ``header`` placement → a request header. ``Bearer``/``Basic`` prefix the
       value with the scheme (standard Authorization forms); ``ApiKey`` sends
@@ -109,10 +122,10 @@ def _credential_headers_and_href(resolution: dict[str, Any]) -> tuple[dict[str, 
 
 
 class ConnectorClient:
-    """Cached per-capability resolver against the connector register. Thread-safe."""
+    """Cached per-capability resolver against the Connector Catalog. Thread-safe."""
 
-    def __init__(self, register_url: str, token: str) -> None:
-        self._connections_url = register_url.rstrip("/") + "/connections"
+    def __init__(self, catalog_url: str, token: str) -> None:
+        self._connections_url = catalog_url.rstrip("/") + "/connections"
         self._token = token
         self._lock = threading.Lock()
         self._cache: dict[str, _CacheEntry] = {}
@@ -123,7 +136,7 @@ class ConnectorClient:
         """Current resolved link for a capability, re-resolving when stale.
 
         Returns None when the capability is off (no intent mapped, no
-        connector registered) or the register is unreachable — callers drop
+        connector registered) or the catalog is unreachable — callers drop
         the telemetry and move on (best-effort).
         """
         intent = _INTENTS.get(name)
@@ -153,7 +166,7 @@ class ConnectorClient:
         self, name: str, intent: dict[str, dict[str, str]], now: float
     ) -> Link | None:
         try:
-            req = urllib.request.Request(  # noqa: S310 — operator-configured register URL
+            req = urllib.request.Request(  # noqa: S310 — operator-configured catalog URL
                 self._connections_url,
                 data=json.dumps(intent).encode(),
                 headers={
@@ -183,7 +196,7 @@ class ConnectorClient:
             code = _problem_code(exc)
             if exc.code == 404 and code == "no_connector_for_capability":
                 # Capability off: nothing serves this signal — negative-cache
-                # so the register isn't hammered; re-check after the TTL.
+                # so the catalog isn't hammered; re-check after the TTL.
                 self._cache[name] = _CacheEntry(link=None, expires_at=now + _DEFAULT_TTL_S)
                 logger.info("capability '%s': no connector registered; disabled for now", name)
                 return None
@@ -195,10 +208,10 @@ class ConnectorClient:
                 code or "no problem code",
                 int(_FAILURE_RETRY_S),
             )
-        except Exception as exc:  # noqa: BLE001 — register down must never break the agent
+        except Exception as exc:  # noqa: BLE001 — catalog down must never break the agent
             self._next_attempt_at[name] = now + _FAILURE_RETRY_S
             logger.warning(
-                "connector register unreachable for '%s' (%s); retrying in %ss",
+                "Connector Catalog unreachable for '%s' (%s); retrying in %ss",
                 name,
                 exc,
                 int(_FAILURE_RETRY_S),
