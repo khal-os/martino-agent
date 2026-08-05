@@ -21,7 +21,9 @@ also arrive natively: the Agno instrumentor emits standard ``session.id`` /
 ``prompt_details.cache_write``) — what the platform prices traces from.
 
 Auto-instrumentation: the Agno OpenInference instrumentor traces every run/LLM/
-tool call. Custom spans use a plain OTel tracer (see tools/example_tools.py).
+tool call. Custom sub-step spans are OFF for now: agno runs tools without the
+run's OTel context current, so a manual span exports as an orphan root trace
+(see tools/example_tools.py:lookup_price for the full story).
 
 Enable with ``CONNECTOR_CATALOG_URL`` + ``M2M_TOKEN`` (the catalog path), or —
 for deployments without the khal platform — with ``TRACES_OTLP_ENDPOINT``

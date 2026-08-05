@@ -54,27 +54,16 @@ def reverse_text(text: str) -> str:
 
 
 def lookup_price(item: str) -> str:
-    """Look up a product's price. Demonstrates a CUSTOM OTel span.
+    """Look up a product's price.
 
-    The Agno instrumentor already traces the tool call itself. Add a custom span
-    around a *sub-step* (e.g. an external API call, a DB query, a retrieval) when
-    you want its own timing/input/output in the trace tree.
+    Deliberately NO custom span here: agno executes tools without the run's
+    OTel context being current, so a manually opened span gets no parent and
+    exports as its own one-span trace — model-less, token-less orphans in the
+    observability platform (one per lookup). The Agno instrumentor already
+    emits the proper TOOL span inside the run's trace; custom sub-step spans
+    can return once the run context propagates into tool execution.
     """
-    try:
-        from opentelemetry import trace
-
-        tracer = trace.get_tracer("agent_app.tools")
-        # openinference.span.kind ∈ TOOL | LLM | RETRIEVER | ... ; input.value /
-        # output.value surface as the node's payloads in the trace tree.
-        with tracer.start_as_current_span("price-catalog-lookup") as span:
-            span.set_attribute("openinference.span.kind", "TOOL")
-            span.set_attribute("input.value", item)
-            price = _PRICE_CATALOG.get(item.lower(), "unknown")
-            span.set_attribute("output.value", price)
-            return f"{item}: {price}"
-    except Exception:  # noqa: BLE001 — telemetry must never break the tool
-        price = _PRICE_CATALOG.get(item.lower(), "unknown")
-        return f"{item}: {price}"
+    return f"{item}: {_PRICE_CATALOG.get(item.lower(), 'unknown')}"
 
 
 # Export the toolset the agent gets. Real projects add API-backed tools here.
