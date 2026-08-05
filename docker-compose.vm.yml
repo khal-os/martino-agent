@@ -7,6 +7,12 @@
 # terminates TLS (chat.<host> → 127.0.0.1:8899). Config comes from .env
 # (model key, OTLP fallback endpoint/key, API_KEY). SQLite state lives in a
 # named volume so sessions/memory survive restarts.
+#
+# REDEPLOY RULE: the VM's .env is authoritative (ENVIRONMENT=prod + the
+# minted API_KEY exist ONLY there). Ship code updates with
+#   rsync -az --exclude .venv --exclude .git --exclude tmp --exclude .env ...
+# — a rsync without `--exclude .env` reverts the deployment to the
+# laptop's open dev config (it happened once; don't repeat it).
 services:
   agent:
     image: martino-agent:local
