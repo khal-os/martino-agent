@@ -31,29 +31,89 @@ USER_ID = os.getenv("CHAT_USER_ID", "user-local")
 
 PAGE = """<!doctype html>
 <meta charset="utf-8">
-<title>__AGENT_NAME__ chat</title>
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>__AGENT_NAME__</title>
 <style>
-  body { font-family: system-ui, sans-serif; max-width: 640px; margin: 2rem auto; padding: 0 1rem; }
-  #log { border: 1px solid #ccc; border-radius: 8px; padding: 1rem; min-height: 320px; }
-  .me, .bot { margin: .5rem 0; padding: .5rem .8rem; border-radius: 8px; white-space: pre-wrap; }
-  .me  { background: #e3f2fd; text-align: right; }
-  .bot { background: #f5f5f5; }
+  * { box-sizing: border-box; }
+  body { margin: 0; font-family: system-ui, "Segoe UI", Helvetica, sans-serif; background: #d9dbd5; }
+  #app { display: flex; flex-direction: column; height: 100dvh; max-width: 680px;
+         margin: 0 auto; box-shadow: 0 0 14px rgba(0,0,0,.25); }
+  header { background: #008069; color: #fff; padding: .55rem .9rem;
+           display: flex; align-items: center; gap: .7rem; }
+  #avatar { width: 40px; height: 40px; border-radius: 50%; background: #25d366;
+            display: grid; place-items: center; font-weight: 600; font-size: 1.15rem; flex: none; }
+  .name { font-weight: 600; line-height: 1.3; }
+  .status { font-size: .78rem; opacity: .85; }
+  #sess { margin-left: auto; font-size: .68rem; opacity: .65; }
+  #log { flex: 1; overflow-y: auto; padding: 1rem .9rem; display: flex; flex-direction: column;
+         gap: 4px; background: #efeae2;
+         background-image: radial-gradient(rgba(0,0,0,.035) 1px, transparent 1.2px);
+         background-size: 22px 22px; }
+  .me, .bot { max-width: 75%; padding: .4rem .6rem .35rem .6rem;
+              border-radius: 8px; white-space: pre-wrap; font-size: .95rem;
+              box-shadow: 0 1px .5px rgba(0,0,0,.13); }
+  .me  { background: #d9fdd3; align-self: flex-end; border-top-right-radius: 0; }
+  .bot { background: #fff; align-self: flex-start; border-top-left-radius: 0; }
   .err { background: #ffebee; }
-  form { display: flex; gap: .5rem; margin-top: 1rem; }
-  input { flex: 1; padding: .6rem; border: 1px solid #ccc; border-radius: 8px; }
-  button { padding: .6rem 1.2rem; border: 0; border-radius: 8px; background: #1976d2; color: #fff; }
-  small { color: #888; }
+  /* WhatsApp-style: the meta floats at the end of the LAST text line and
+     drops below when the line is full — never overlaps the text. */
+  .meta { float: right; margin: .55rem 0 0 .75rem; font-size: .66rem; color: #667781;
+          display: flex; gap: 3px; align-items: center; }
+  .ticks { color: #53bdeb; font-size: .8rem; line-height: 1; }
+  .dots { display: inline-flex; gap: 3px; padding: .25rem .1rem; }
+  .dots i { width: 7px; height: 7px; border-radius: 50%; background: #9aa0a6;
+            animation: bounce 1.2s infinite; }
+  .dots i:nth-child(2) { animation-delay: .15s; }
+  .dots i:nth-child(3) { animation-delay: .3s; }
+  @keyframes bounce { 0%,60%,100% { transform: translateY(0); opacity: .5; }
+                      30% { transform: translateY(-4px); opacity: 1; } }
+  footer { background: #f0f2f5; padding: .5rem .6rem; }
+  form { display: flex; gap: .5rem; align-items: center; }
+  input { flex: 1; padding: .68rem 1rem; border: 0; border-radius: 24px;
+          font-size: .95rem; outline: none; background: #fff; }
+  button { width: 46px; height: 46px; border: 0; border-radius: 50%; background: #008069;
+           color: #fff; display: grid; place-items: center; cursor: pointer; flex: none; }
+  button:active { background: #017561; }
 </style>
-<h2>__AGENT_NAME__ <small id="sess"></small></h2>
-<div id="log"></div>
-<form id="f"><input id="t" placeholder="Say something…" autofocus autocomplete="off"><button>Send</button></form>
+<div id="app">
+  <header>
+    <div id="avatar"></div>
+    <div><div class="name">__AGENT_NAME__</div><div class="status">online</div></div>
+    <div id="sess"></div>
+  </header>
+  <div id="log"></div>
+  <footer>
+    <form id="f">
+      <input id="t" placeholder="Mensagem" autofocus autocomplete="off">
+      <button aria-label="Send"><svg viewBox="0 0 24 24" width="22" height="22" fill="currentColor">
+        <path d="M3.4 20.4l17.45-7.48a1 1 0 000-1.84L3.4 3.6a.993.993 0 00-1.39.91L2 9.12c0
+                 .5.37.93.87.99L17 12 2.87 13.88c-.5.07-.87.5-.87 1l.01 4.61c0 .71.73 1.2 1.39.91z"/>
+      </svg></button>
+    </form>
+  </footer>
+</div>
 <script>
   const sess = "ui-" + Math.random().toString(36).slice(2, 10);
   document.getElementById("sess").textContent = sess;
+  document.getElementById("avatar").textContent =
+    "__AGENT_NAME__".charAt(0).toUpperCase() || "A";
   const log = document.getElementById("log");
-  const add = (cls, text) => {
+  const now = () => new Date().toLocaleTimeString([],
+    { hour: "2-digit", minute: "2-digit", hour12: false });
+  // Each bubble = content span + meta (time, and WhatsApp-style ✓✓ on outgoing).
+  const add = (cls, text, ticks) => {
     const d = document.createElement("div");
-    d.className = cls; d.textContent = text;
+    d.className = cls;
+    const txt = document.createElement("span");
+    txt.className = "txt"; txt.textContent = text;
+    const meta = document.createElement("span");
+    meta.className = "meta"; meta.textContent = now();
+    if (ticks) {
+      const t = document.createElement("span");
+      t.className = "ticks"; t.textContent = "\\u2713\\u2713";
+      meta.appendChild(t);
+    }
+    d.append(txt, meta);
     log.appendChild(d); log.scrollTop = log.scrollHeight;
     return d;
   };
@@ -62,16 +122,21 @@ PAGE = """<!doctype html>
     const t = document.getElementById("t");
     const msg = t.value.trim();
     if (!msg) return;
-    t.value = ""; add("me", msg);
-    const wait = add("bot", "…");
+    t.value = ""; add("me", msg, true);
+    const wait = add("bot", "");
+    wait.querySelector(".txt").innerHTML = '<span class="dots"><i></i><i></i><i></i></span>';
+    const done = (text, err) => {
+      wait.querySelector(".txt").textContent = text;
+      if (err) wait.className = "bot err";
+      log.scrollTop = log.scrollHeight;
+    };
     try {
       const r = await fetch("/send", { method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ message: msg, session_id: sess }) });
       const d = await r.json();
-      wait.textContent = d.content || "(no content)";
-      if (d.status === "ERROR") wait.className = "bot err";
-    } catch (err) { wait.textContent = "request failed: " + err; wait.className = "bot err"; }
+      done(d.content || "(no content)", d.status === "ERROR");
+    } catch (err) { done("request failed: " + err, true); }
   };
 </script>
 """.replace("__AGENT_NAME__", SETTINGS.agent_name)
