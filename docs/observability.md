@@ -183,7 +183,7 @@ pieces:
 
 ```bash
 make langwatch-up      # full stack: app(:5560)+workers+nlp+langevals+postgres+redis+clickhouse
-make langwatch-init    # DEV-ONLY: auto-creates account+org+project, writes LANGWATCH_API_KEY to .env
+make langwatch-init    # DEV-ONLY: auto-creates account+org+project, PRINTS the env lines to paste into .env
 ```
 
 **The agent does not read `LANGWATCH_API_KEY`** — the key's job is to be
@@ -202,11 +202,11 @@ VAULT_CREDENTIALS_JSON='{"workos-vault://langwatch-cliente":"<LANGWATCH_API_KEY>
 ```
 
 Then register the connector (in-memory — repeat after every catalog restart;
-the script lives with the connector, in observability-module):
+the script lives with the connector, in usage-billing-component):
 
 ```bash
 OTLP_ENDPOINT=http://localhost:5560/api/otel/v1/traces \
-  ../observability-module/scripts/connector/register.sh
+  ../usage-billing-component/scripts/connector/register.sh
 ```
 
 **c) The agent**, pointed at the catalog with its M2M token. The token is
@@ -222,14 +222,13 @@ export M2M_TOKEN=$(curl -s -X POST http://127.0.0.1:7104/agents/martino/token \
 make dev
 ```
 
-> **LEGACY — works today, delete once the platform ships the token route and
-> drops scope checks.** The target model has NO scopes (identity-only auth),
-> but the local catalog still enforces them and has no token route yet, so
-> mint a dev claims token (base64url JSON, read verbatim) carrying the legacy
-> scopes:
+> **LEGACY — works today, delete once the platform ships the token route.**
+> Scopes are gone (identity-only M2M) and the catalogs no longer check them,
+> but the token route doesn't exist yet — mint a scopeless dev claims token
+> (base64url JSON, read verbatim) instead:
 >
 > ```bash
-> export M2M_TOKEN=$(python3 -c "import base64,json;print(base64.urlsafe_b64encode(json.dumps({'tenant':'acme','client_id':'martino','scope':'connectors.connection:resolve monitoring.trace:write'}).encode()).decode().rstrip('='))")
+> export M2M_TOKEN=$(python3 -c "import base64,json;print(base64.urlsafe_b64encode(json.dumps({'tenant':'acme','client_id':'martino'}).encode()).decode().rstrip('='))")
 > ```
 
 Every run is now traced into the local LangWatch. Rotate the key or move the

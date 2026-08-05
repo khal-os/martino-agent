@@ -1,7 +1,8 @@
 #!/usr/bin/env bash
 # ⚠️ LOCAL DEV ONLY. Bootstraps a from-scratch self-hosted LangWatch on your
 # machine: creates the account → org → project, grabs the project API key, and
-# writes it to .env. Idempotent (re-runs reuse the existing project's key).
+# PRINTS the env lines for you to copy into your .env — scripts never write
+# env vars anywhere. Idempotent (re-runs reuse the existing project's key).
 #
 #   make langwatch-up && make langwatch-init
 #
@@ -26,7 +27,6 @@ LW_PASSWORD="${LW_PASSWORD:-Template-Dev-2026!}"
 LW_ORG="${LW_ORG:-Namastex}"
 LW_PROJECT="${LW_PROJECT:-agent-template}"
 COMPOSE="${COMPOSE:-docker-compose.langwatch.yml}"
-ENV_FILE="${ENV_FILE:-.env}"
 
 COOKIES="$(mktemp)"
 trap 'rm -f "$COOKIES"' EXIT
@@ -84,20 +84,10 @@ fi
 
 [ -n "$KEY" ] || { echo "Failed to obtain a project API key." >&2; exit 1; }
 
-# 6. Write into .env (create from example if missing; upsert the three keys).
-[ -f "$ENV_FILE" ] || cp .env.example "$ENV_FILE"
-# Replace the key in place if present, else append. Explicit if/else so a failed
-# sed never falls through to a duplicate append (the `A && B || C` idiom would).
-upsert() {
-  if grep -qE "^$1=" "$ENV_FILE"; then
-    sed -i.bak -E "s#^$1=.*#$1=$2#" "$ENV_FILE"
-  else
-    printf '\n%s=%s\n' "$1" "$2" >> "$ENV_FILE"
-  fi
-}
-upsert LANGWATCH_ENABLED 1
-upsert LANGWATCH_ENDPOINT "$LANGWATCH_URL"
-upsert LANGWATCH_API_KEY "$KEY"
-rm -f "$ENV_FILE.bak"
-
-say "Done. LANGWATCH_API_KEY written to $ENV_FILE (${KEY:0:12}...). UI: $LANGWATCH_URL"
+# 6. Print the env lines — the HUMAN puts them in .env (policy: no script
+# writes env vars anywhere; a script may at most print them for copy-paste).
+say "Done. Copy the lines below into your .env (create it from .env.example if missing). UI: $LANGWATCH_URL"
+echo
+echo "LANGWATCH_ENABLED=1"
+echo "LANGWATCH_ENDPOINT=$LANGWATCH_URL"
+echo "LANGWATCH_API_KEY=$KEY"

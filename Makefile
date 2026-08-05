@@ -106,7 +106,7 @@ langwatch-up: net ## Bring up the self-hosted LangWatch stack
 	docker compose -f docker-compose.langwatch.yml up -d
 	@echo "LangWatch UI → http://localhost:5560  —  run 'make langwatch-init' to auto-create the project + API key"
 
-langwatch-init: ## [DEV] Auto-provision local account+org+project → LANGWATCH_API_KEY in .env
+langwatch-init: ## [DEV] Auto-provision local account+org+project → prints the env lines to paste into .env
 	bash scripts/langwatch_bootstrap.sh
 
 langwatch-down: ## Tear down the LangWatch stack

@@ -75,7 +75,7 @@ make seed                     # embeds knowledge_base/*.md into PgVector
 ```bash
 make install-obs              # observability + QA extras (langwatch, scenario, pandas)
 make langwatch-up             # self-hosted LangWatch stack → http://localhost:5560
-make langwatch-init           # DEV-ONLY: auto-creates project + writes LANGWATCH_API_KEY to .env
+make langwatch-init           # DEV-ONLY: auto-creates project + PRINTS the env lines to paste into .env
 ```
 The agent itself never reads `LANGWATCH_API_KEY` — tracing turns on via
 `CONNECTOR_CATALOG_URL` + `M2M_TOKEN` (the agent's identity token, issued by
