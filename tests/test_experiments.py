@@ -302,6 +302,7 @@ def client(monkeypatch, tmp_path):
     monkeypatch.setenv("ENVIRONMENT", "dev")
     monkeypatch.delenv("CONNECTOR_CATALOG_URL", raising=False)
     monkeypatch.delenv("CONNECTOR_REGISTER_URL", raising=False)
+    monkeypatch.delenv("TRACES_OTLP_ENDPOINT", raising=False)
     monkeypatch.setenv("EXPERIMENTS_STORE_PATH", str(tmp_path / "alloc.json"))
     config.get_settings.cache_clear()
     from agent_app.experiments import store as store_mod
@@ -408,6 +409,7 @@ def _restore_main():
     yield
     os.environ.pop("CONNECTOR_CATALOG_URL", None)
     os.environ.pop("CONNECTOR_REGISTER_URL", None)
+    os.environ.pop("TRACES_OTLP_ENDPOINT", None)
     config.get_settings.cache_clear()
     import agent_app.main as main
 

@@ -23,8 +23,13 @@ also arrive natively: the Agno instrumentor emits standard ``session.id`` /
 Auto-instrumentation: the Agno OpenInference instrumentor traces every run/LLM/
 tool call. Custom spans use a plain OTel tracer (see tools/example_tools.py).
 
-Enable with ``CONNECTOR_CATALOG_URL`` + ``M2M_TOKEN``. No-op — and
-never crashes the app — when either is unset or when deps aren't installed.
+Enable with ``CONNECTOR_CATALOG_URL`` + ``M2M_TOKEN`` (the catalog path), or —
+for deployments without the khal platform — with ``TRACES_OTLP_ENDPOINT``
+(+ optional ``TRACES_OTLP_API_KEY``) as a direct-OTLP fallback consulted only
+when no catalog URL is set. The catalog path keeps runtime re-resolution
+(host moves / key rotations, no restart); the fallback is a fixed target.
+No-op — and never crashes the app — when neither is configured or when deps
+aren't installed.
 """
 
 from __future__ import annotations
@@ -120,9 +125,11 @@ class _ConnectorSpanExporter:
 
 def setup_observability(settings: Settings) -> None:
     global _INITIALIZED, _CONNECTOR
-    if _INITIALIZED or not settings.connector_catalog_url:
+    if _INITIALIZED:
         return
-    if not settings.m2m_token:
+    if not settings.connector_catalog_url and not settings.traces_otlp_endpoint:
+        return
+    if settings.connector_catalog_url and not settings.m2m_token:
         # The catalog requires auth — url without token can never resolve.
         logger.warning(
             "CONNECTOR_CATALOG_URL is set but M2M_TOKEN is not; "
@@ -135,10 +142,24 @@ def setup_observability(settings: Settings) -> None:
         from opentelemetry.sdk.trace import TracerProvider
         from opentelemetry.sdk.trace.export import BatchSpanProcessor
 
-        _CONNECTOR = ConnectorClient(settings.connector_catalog_url, settings.m2m_token)
+        if settings.connector_catalog_url and settings.m2m_token:
+            _CONNECTOR = ConnectorClient(settings.connector_catalog_url, settings.m2m_token)
+            exporter: Any = _ConnectorSpanExporter(_CONNECTOR)
+        else:
+            # Direct-OTLP fallback (no platform): fixed endpoint from the env.
+            # No ConnectorClient → track_event() stays off (events need the
+            # catalog's `events` link); traces are the capability this serves.
+            from opentelemetry.exporter.otlp.proto.http.trace_exporter import OTLPSpanExporter
+
+            headers = (
+                {"Authorization": f"Bearer {settings.traces_otlp_api_key}"}
+                if settings.traces_otlp_api_key
+                else {}
+            )
+            exporter = OTLPSpanExporter(endpoint=settings.traces_otlp_endpoint, headers=headers)
 
         provider = TracerProvider(resource=Resource.create(_resource_attributes(settings)))
-        provider.add_span_processor(BatchSpanProcessor(_ConnectorSpanExporter(_CONNECTOR)))
+        provider.add_span_processor(BatchSpanProcessor(exporter))
         otel_trace.set_tracer_provider(provider)
 
         try:
@@ -152,12 +173,21 @@ def setup_observability(settings: Settings) -> None:
             )
 
         _INITIALIZED = True
-        logger.info(
-            "observability enabled → catalog=%s (service=%s env=%s)",
-            settings.connector_catalog_url,
-            settings.service_name,
-            settings.environment,
-        )
+        if settings.connector_catalog_url:
+            logger.info(
+                "observability enabled → catalog=%s (service=%s env=%s)",
+                settings.connector_catalog_url,
+                settings.service_name,
+                settings.environment,
+            )
+        else:
+            logger.info(
+                "observability enabled → direct OTLP endpoint=%s "
+                "(fallback mode — no connector catalog; service=%s env=%s)",
+                settings.traces_otlp_endpoint,
+                settings.service_name,
+                settings.environment,
+            )
     except ImportError:
         logger.warning("opentelemetry-sdk not installed; skipping. Install '.[observability]'.")
     except Exception as exc:  # noqa: BLE001 — never let telemetry break the app

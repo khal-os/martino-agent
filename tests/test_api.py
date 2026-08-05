@@ -25,6 +25,7 @@ def build(monkeypatch, *, api_key=None, environment="dev"):
     monkeypatch.setenv("ENVIRONMENT", environment)
     monkeypatch.delenv("CONNECTOR_CATALOG_URL", raising=False)
     monkeypatch.delenv("CONNECTOR_REGISTER_URL", raising=False)
+    monkeypatch.delenv("TRACES_OTLP_ENDPOINT", raising=False)
     config.get_settings.cache_clear()
     import agent_app.main as main
 
@@ -147,5 +148,6 @@ def _restore_main():
 
     os.environ.pop("CONNECTOR_CATALOG_URL", None)
     os.environ.pop("CONNECTOR_REGISTER_URL", None)
+    os.environ.pop("TRACES_OTLP_ENDPOINT", None)
     config.get_settings.cache_clear()
     importlib.reload(main)

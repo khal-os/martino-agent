@@ -299,6 +299,7 @@ def test_setup_observability_url_without_token_stays_off(monkeypatch):
 
     monkeypatch.setenv("CONNECTOR_CATALOG_URL", "http://catalog.local")
     monkeypatch.delenv("M2M_TOKEN", raising=False)
+    monkeypatch.delenv("TRACES_OTLP_ENDPOINT", raising=False)
     config.get_settings.cache_clear()
 
     import agent_app.observability as obs

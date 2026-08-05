@@ -104,6 +104,13 @@ class Settings:
     # Connector Catalog. Auth is identity-only: valid token + right tenant —
     # there are no scopes in the M2M model.
     m2m_token: str | None
+    # Direct-OTLP fallback for deployments WITHOUT the khal platform: a fixed
+    # exporter target used only when connector_catalog_url is unset. The
+    # catalog remains the preferred path (host moves / key rotations propagate
+    # without a restart); this trades that for zero platform dependency. The
+    # key (optional) is sent as `Authorization: Bearer <key>`.
+    traces_otlp_endpoint: str | None
+    traces_otlp_api_key: str | None
     # Trace metadata (rich by default):
     service_name: str  # OTel service.name (Resource) — was "unknown_service"
     agent_instance: str  # this deployment/replica (AGENT_INSTANCE, default: hostname)
@@ -165,6 +172,9 @@ def _from_env() -> Settings:
         or os.getenv("CONNECTOR_REGISTER_URL")
         or None,
         m2m_token=os.getenv("M2M_TOKEN") or None,
+        # Direct-OTLP fallback — only consulted when no catalog URL is set.
+        traces_otlp_endpoint=os.getenv("TRACES_OTLP_ENDPOINT") or None,
+        traces_otlp_api_key=os.getenv("TRACES_OTLP_API_KEY") or None,
         service_name=os.getenv("OTEL_SERVICE_NAME") or os.getenv("AGENT_ID") or "assistant",
         agent_instance=os.getenv("AGENT_INSTANCE") or socket.gethostname(),
         environment=environment,
