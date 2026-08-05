@@ -18,8 +18,11 @@ WORKDIR /app
 # src/agent_app/_version.py (dynamic hatch version), so copy those first.
 COPY pyproject.toml README.md ./
 COPY src/ ./src/
+# [observability] included: without the OTel SDK the container silently skips
+# tracing (observability.py catches the ImportError) — the deployed agent MUST
+# be able to ship traces.
 RUN --mount=type=cache,target=/root/.cache/uv \
-    uv venv && uv pip install -e .
+    uv venv && uv pip install -e '.[observability]'
 
 COPY scripts/ ./scripts/
 

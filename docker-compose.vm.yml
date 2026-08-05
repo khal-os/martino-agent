@@ -1,0 +1,48 @@
+# Single-VM production deploy: agent + chat UI from the SAME image.
+#
+#   docker compose -f docker-compose.vm.yml up -d --build
+#
+# The agent is NOT published to the host — the chat UI proxies to it over the
+# compose network and is itself bound to loopback only; the host's caddy
+# terminates TLS (chat.<host> → 127.0.0.1:8899). Config comes from .env
+# (model key, OTLP fallback endpoint/key, API_KEY). SQLite state lives in a
+# named volume so sessions/memory survive restarts.
+services:
+  agent:
+    image: martino-agent:local
+    build: .
+    env_file: .env
+    volumes:
+      - agent-data:/app/tmp
+    restart: unless-stopped
+    deploy:
+      resources:
+        limits:
+          memory: 1g
+
+  chat:
+    image: martino-agent:local
+    command: ["python", "scripts/chat_ui.py"]
+    env_file: .env
+    environment:
+      CHAT_UI_HOST: 0.0.0.0
+      AGENT_URL: http://agent:8888/agents/${AGENT_ID:-martino}/runs
+    ports:
+      - "127.0.0.1:8899:8899"
+    depends_on:
+      - agent
+    # Override the image's healthcheck — it probes the AGENT's /livez on 8888,
+    # which this container doesn't run.
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request,sys; sys.exit(0 if urllib.request.urlopen('http://127.0.0.1:8899/').status==200 else 1)"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+    restart: unless-stopped
+    deploy:
+      resources:
+        limits:
+          memory: 256m
+
+volumes:
+  agent-data:

@@ -9,7 +9,13 @@ platform (thread_id) and the Sessions view.
     make chat            # then open http://localhost:8899
     # agent id + port come from Settings (.env); overrides:
     #   CHAT_UI_PORT   port for this UI          (default 8899)
+    #   CHAT_UI_HOST   bind address              (default 127.0.0.1;
+    #                  0.0.0.0 in a container/behind a reverse proxy)
     #   CHAT_USER_ID   user_id sent with each turn (default user-local)
+    #   AGENT_URL      full runs URL of the agent (default: localhost from
+    #                  Settings — set it when the agent is another container)
+    # When the agent has API_KEY set (any non-dev deploy), the proxy forwards
+    # it as a Bearer token — the key stays server-side, never in the page.
 """
 
 import json
@@ -25,7 +31,8 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
 from agent_app.config import get_settings
 
 SETTINGS = get_settings()
-AGENT_URL = f"http://127.0.0.1:{SETTINGS.port}/agents/{SETTINGS.agent_id}/runs"
+AGENT_URL = os.getenv("AGENT_URL") or f"http://127.0.0.1:{SETTINGS.port}/agents/{SETTINGS.agent_id}/runs"
+UI_HOST = os.getenv("CHAT_UI_HOST", "127.0.0.1")
 UI_PORT = int(os.getenv("CHAT_UI_PORT", "8899"))
 USER_ID = os.getenv("CHAT_USER_ID", "user-local")
 
@@ -161,9 +168,11 @@ class Handler(BaseHTTPRequestHandler):
                 parts.append(f"--{boundary}\r\nContent-Disposition: form-data; "
                              f'name="{k}"\r\n\r\n{v}\r\n')
             payload = ("".join(parts) + f"--{boundary}--\r\n").encode()
-            up = urllib.request.Request(  # noqa: S310 — fixed localhost agent URL
-                AGENT_URL, data=payload, method="POST",
-                headers={"Content-Type": f"multipart/form-data; boundary={boundary}"})
+            headers = {"Content-Type": f"multipart/form-data; boundary={boundary}"}
+            if SETTINGS.api_key:  # same env as the agent — forward its key server-side
+                headers["Authorization"] = f"Bearer {SETTINGS.api_key}"
+            up = urllib.request.Request(  # noqa: S310 — env/Settings-fixed agent URL
+                AGENT_URL, data=payload, method="POST", headers=headers)
             with urllib.request.urlopen(up, timeout=120) as resp:  # noqa: S310 — localhost agent
                 data = json.load(resp)
             out = json.dumps({"status": data.get("status"),
@@ -182,5 +191,5 @@ class Handler(BaseHTTPRequestHandler):
 
 
 if __name__ == "__main__":
-    print(f"[chat-ui] http://localhost:{UI_PORT}  →  {AGENT_URL}", flush=True)
-    HTTPServer(("127.0.0.1", UI_PORT), Handler).serve_forever()
+    print(f"[chat-ui] http://{UI_HOST}:{UI_PORT}  →  {AGENT_URL}", flush=True)
+    HTTPServer((UI_HOST, UI_PORT), Handler).serve_forever()
